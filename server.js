@@ -3101,8 +3101,10 @@ async function syncBrowserPoolModeFromStore() {
 
 async function spawnWorkerWithBrowser({ jobKey, runtimeEnv, runScript }) {
     const poolEnabled = browserPool.getRuntimeEnabled();
-    if (!poolEnabled) {
-        logTask(jobKey, '浏览器模式: 独立启动（后台已关闭浏览器池）');
+    if (!poolEnabled || runtimeEnv.HEADFUL === '1') {
+        logTask(jobKey, runtimeEnv.HEADFUL === '1'
+            ? '浏览器模式: 独立有头启动（不占用浏览器池）'
+            : '浏览器模式: 独立启动（后台已关闭浏览器池）');
         return runScript(buildWorkerRuntimeEnv(runtimeEnv, null, 'standalone'));
     }
     return browserPool.withBrowserSlot(jobKey, async (poolSlot) => {
@@ -3117,7 +3119,7 @@ async function spawnWorkerWithBrowser({ jobKey, runtimeEnv, runScript }) {
 }
 
 function spawnCheckoutDebugWorker({ task, token, sessionRaw, planType, region, planNameOverride, email }) {
-    (async () => {
+    return (async () => {
         const checkoutScript = path.join(__dirname, 'index.js');
         try {
             const proxy = await store.getActiveProxy();
@@ -3127,7 +3129,7 @@ function spawnCheckoutDebugWorker({ task, token, sessionRaw, planType, region, p
                 ...process.env,
                 ...hcaptchaEnv,
                 CHECKOUT_DEBUG_ONLY: '1',
-                CHECKOUT_MODE: 'api',
+                CHECKOUT_MODE: process.env.CHECKOUT_MODE || 'auto',
                 CHATGPT_TOKEN: token,
                 CHATGPT_SESSION_JSON: String(sessionRaw || '').startsWith('{') ? sessionRaw : '',
                 CDK_PLAN_TYPE: planType,

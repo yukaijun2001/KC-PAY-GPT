@@ -64,11 +64,11 @@ function buildDebugScreenshotPath(prefix) {
 // 关闭 context 后把录像重命名为带任务标识的稳定文件名，并输出路径供 server 解析
 async function finalizeVideo(context, page, options = {}) {
     const deleteOnSuccess = Boolean(options.deleteOnSuccess);
-    if (!RECORD_VIDEO || !context) return null;
+    if (!context) return null;
     try {
         const pages = (typeof context.pages === 'function' ? context.pages() : []) || [];
         const targetPage = (page && typeof page.video === 'function' && page.video()) ? page : pages.find((p) => p && p.video && p.video());
-        const video = targetPage && targetPage.video ? targetPage.video() : null;
+        const video = RECORD_VIDEO && targetPage && targetPage.video ? targetPage.video() : null;
 
         await context.close().catch(() => { });
 
@@ -188,276 +188,277 @@ async function run() {
     let page = null;
     let paymentSucceeded = false;
 
-    const preparedProxy = await preparePlaywrightProxy(CONFIG.proxy);
-    proxyCleanup = preparedProxy.cleanup;
-    const proxyConfig = preparedProxy.proxyConfig;
-
-    if (proxyConfig) {
-        console.log(`🌐 [系统] 代理已配置${preparedProxy.relayed ? '（SOCKS→本地 HTTP 中继）' : ''}`);
-    }
-
-    browserSession = await connectTaskBrowser({
-        proxyConfig,
-        headful: DEBUG_HEADFUL,
-        chromiumChannel: CHROMIUM_CHANNEL
-    });
-    applyCdpEnv(browserSession);
-    browser = browserSession.browser;
-
-    const realUserAgent = browserSession.realUserAgent;
-
-    const viewport = { width: 1920, height: 1080 };
-    const matched = realUserAgent.match(/Chrome\/(\d+)/);
-    const chromeMajor = matched ? Number(matched[1]) : 147;
-
-    const paymentRegion = String(CONFIG.paymentRegionOverride || '').trim().toUpperCase()
-        || await store.getPaymentRegion();
-    const regionCfg = getRegionConfig(paymentRegion);
-    const browserProfile = getRegionBrowserProfile(paymentRegion);
-
-    const contextOptions = {
-        userAgent: realUserAgent,
-        viewport,
-        locale: browserProfile.locale,
-        timezoneId: browserProfile.timezoneId,
-        screen: { width: 1920, height: 1080 },
-        deviceScaleFactor: 1,
-        isMobile: false,
-        hasTouch: false,
-        extraHTTPHeaders: {
-            'sec-ch-ua': `"Not)A;Brand";v="8", "Chromium";v="${chromeMajor}", "Google Chrome";v="${chromeMajor}"`,
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"'
-        }
-    };
-    if (proxyConfig) {
-        contextOptions.proxy = proxyConfig;
-    }
-
-    // 全程录像，便于回看自动化卡在哪一步（输出到挂载目录，前台可播放）
-    if (RECORD_VIDEO) {
-        contextOptions.recordVideo = {
-            dir: VIDEO_DIR,
-            size: { width: 1280, height: 720 }
-        };
-    }
-
-    context = await browser.newContext(contextOptions);
-    const sessionRaw = CONFIG.chatgptSessionJson || CONFIG.chatgptToken;
-    const installResult = await installChatGptSession(context, sessionRaw);
-    const sessionData = installResult?.sessionData || installResult;
-    const cookieVerified = Boolean(installResult?.cookieVerified);
-
-    // ============= 指纹伪装 =============
-    await context.addInitScript((injectedChromeMajor) => {
-        const NavProto = Object.getPrototypeOf(navigator);
-        const ScrProto = Object.getPrototypeOf(screen);
-        const safeDefine = (obj, key, getter) => {
-            try {
-                Object.defineProperty(obj, key, { get: getter, configurable: true });
-            } catch (_) { /* ignore */ }
-        };
-
-        // 隐藏 webdriver
-        try { delete Object.getPrototypeOf(navigator).webdriver; } catch (_) { }
-        safeDefine(NavProto, 'webdriver', () => undefined);
-        try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true }); } catch (_) { }
-
-        // navigator.userAgentData
-        try {
-            const uaData = {
-                brands: [
-                    { brand: 'Not)A;Brand', version: '8' },
-                    { brand: 'Chromium', version: String(injectedChromeMajor) },
-                    { brand: 'Google Chrome', version: String(injectedChromeMajor) }
-                ],
-                mobile: false,
-                platform: 'Windows',
-                getHighEntropyValues: () => Promise.resolve({
-                    architecture: 'x86',
-                    bitness: '64',
-                    mobile: false,
-                    model: '',
-                    platform: 'Windows',
-                    platformVersion: '15.0.0',
-                    wow64: false
-                }),
-                toJSON: () => ({ brands: uaData.brands, mobile: uaData.mobile, platform: uaData.platform })
-            };
-            safeDefine(NavProto, 'userAgentData', () => uaData);
-        } catch (_) { }
-
-        // plugins / mimeTypes
-        try {
-            const pdfMime = Object.create(MimeType.prototype);
-            Object.defineProperties(pdfMime, {
-                type: { get: () => 'application/pdf' },
-                suffixes: { get: () => 'pdf' },
-                description: { get: () => 'Portable Document Format' }
-            });
-            const pdfPlugin = Object.create(Plugin.prototype);
-            Object.defineProperties(pdfPlugin, {
-                name: { get: () => 'Chrome PDF Plugin' },
-                filename: { get: () => 'internal-pdf-viewer' },
-                description: { get: () => 'Portable Document Format' },
-                length: { get: () => 1 },
-                0: { get: () => pdfMime }
-            });
-            pdfPlugin.item = () => pdfMime;
-            pdfPlugin.namedItem = () => pdfMime;
-
-            const fakePlugins = Object.create(PluginArray.prototype);
-            Object.defineProperties(fakePlugins, {
-                length: { get: () => 1 },
-                0: { get: () => pdfPlugin }
-            });
-            fakePlugins.item = () => pdfPlugin;
-            fakePlugins.namedItem = (n) => n === pdfPlugin.name ? pdfPlugin : null;
-            fakePlugins.refresh = () => { };
-
-            const fakeMimeTypes = Object.create(MimeTypeArray.prototype);
-            Object.defineProperties(fakeMimeTypes, {
-                length: { get: () => 1 },
-                0: { get: () => pdfMime }
-            });
-            fakeMimeTypes.item = () => pdfMime;
-            fakeMimeTypes.namedItem = (n) => n === pdfMime.type ? pdfMime : null;
-
-            safeDefine(NavProto, 'plugins', () => fakePlugins);
-            safeDefine(NavProto, 'mimeTypes', () => fakeMimeTypes);
-        } catch (_) { }
-
-        // 语言、平台、硬件
-        safeDefine(NavProto, 'languages', () => ['en-US', 'en']);
-        safeDefine(NavProto, 'language', () => 'en-US');
-        safeDefine(NavProto, 'platform', () => 'Win32');
-        safeDefine(NavProto, 'hardwareConcurrency', () => 8);
-        safeDefine(NavProto, 'deviceMemory', () => 8);
-        safeDefine(NavProto, 'maxTouchPoints', () => 0);
-        safeDefine(NavProto, 'vendor', () => 'Google Inc.');
-
-        // navigator.connection
-        try {
-            const conn = { effectiveType: '4g', rtt: 100, downlink: 10, saveData: false };
-            safeDefine(NavProto, 'connection', () => conn);
-        } catch (_) { }
-
-        // window.chrome
-        try {
-            const fakeChrome = {
-                app: {
-                    isInstalled: false,
-                    InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
-                    RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
-                    getDetails: () => null,
-                    getIsInstalled: () => false
-                },
-                runtime: {
-                    OnInstalledReason: { CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update' },
-                    OnRestartRequiredReason: { APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' },
-                    PlatformArch: { ARM: 'arm', ARM64: 'arm64', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
-                    PlatformNaclArch: { ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
-                    PlatformOs: { ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' },
-                    RequestUpdateCheckStatus: { NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available' },
-                    connect: () => { },
-                    sendMessage: () => { }
-                },
-                csi: () => ({ onloadT: Date.now(), pageT: Date.now() - 1000, startE: Date.now() - 2000, tran: 15 }),
-                loadTimes: () => ({
-                    requestTime: Date.now() / 1000 - 2,
-                    startLoadTime: Date.now() / 1000 - 1.5,
-                    commitLoadTime: Date.now() / 1000 - 1,
-                    finishDocumentLoadTime: Date.now() / 1000 - 0.5,
-                    finishLoadTime: Date.now() / 1000,
-                    firstPaintTime: Date.now() / 1000 - 0.3,
-                    firstPaintAfterLoadTime: 0,
-                    navigationType: 'Other',
-                    wasFetchedViaSpdy: true,
-                    wasNpnNegotiated: true,
-                    npnNegotiatedProtocol: 'h2',
-                    wasAlternateProtocolAvailable: false,
-                    connectionInfo: 'h2'
-                })
-            };
-            Object.defineProperty(window, 'chrome', { value: fakeChrome, writable: true, configurable: true });
-        } catch (_) { }
-
-        // permissions.query
-        try {
-            const origQuery = navigator.permissions.query.bind(navigator.permissions);
-            navigator.permissions.query = (params) => {
-                if (params && params.name === 'notifications') {
-                    return Promise.resolve({ state: typeof Notification !== 'undefined' ? Notification.permission : 'default', onchange: null });
-                }
-                return origQuery(params).catch(() => ({ state: 'prompt', onchange: null }));
-            };
-        } catch (_) { }
-
-        // screen
-        safeDefine(ScrProto, 'availHeight', () => 1032);
-        safeDefine(ScrProto, 'availWidth', () => 1920);
-        safeDefine(ScrProto, 'colorDepth', () => 24);
-        safeDefine(ScrProto, 'pixelDepth', () => 24);
-        safeDefine(ScrProto, 'width', () => 1920);
-        safeDefine(ScrProto, 'height', () => 1080);
-
-        // Canvas 微噪声
-        try {
-            const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-            HTMLCanvasElement.prototype.toDataURL = function (...args) {
-                const ctx = this.getContext('2d');
-                if (ctx) {
-                    try {
-                        const w = this.width, h = this.height;
-                        if (w > 0 && h > 0) {
-                            const data = ctx.getImageData(0, 0, 1, 1);
-                            data.data[3] = Math.max(1, data.data[3] - 1);
-                            ctx.putImageData(data, 0, 0);
-                        }
-                    } catch (_) { }
-                }
-                return origToDataURL.apply(this, args);
-            };
-        } catch (_) { }
-
-        // WebGL
-        try {
-            const fakeWebGL = (gl) => {
-                const origGetParameter = gl.getParameter.bind(gl);
-                gl.getParameter = function (param) {
-                    if (param === 0x9245) return 'Google Inc. (Intel)';
-                    if (param === 0x9246) return 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)';
-                    return origGetParameter(param);
-                };
-            };
-            const origGetCtx = HTMLCanvasElement.prototype.getContext;
-            HTMLCanvasElement.prototype.getContext = function (type, ...args) {
-                const ctx = origGetCtx.call(this, type, ...args);
-                if (ctx && (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl')) {
-                    try { fakeWebGL(ctx); } catch (_) { }
-                }
-                return ctx;
-            };
-        } catch (_) { }
-
-        // ChromeDriver 痕迹
-        try {
-            for (const key of Object.keys(window)) {
-                if (/^(cdc_|\$cdc_|_phantom|callPhantom|webdriver-|driver-)/.test(key)) {
-                    try { delete window[key]; } catch (_) { }
-                }
-            }
-        } catch (_) { }
-
-        // Notification.permission
-        try {
-            if (typeof Notification !== 'undefined') {
-                Object.defineProperty(Notification, 'permission', { get: () => 'default', configurable: true });
-            }
-        } catch (_) { }
-    }, chromeMajor);
-
     try {
+        const preparedProxy = await preparePlaywrightProxy(CONFIG.proxy);
+        proxyCleanup = preparedProxy.cleanup;
+        const proxyConfig = preparedProxy.proxyConfig;
+
+        if (proxyConfig) {
+            console.log(`🌐 [系统] 代理已配置${preparedProxy.relayed ? '（SOCKS→本地 HTTP 中继）' : ''}`);
+        }
+
+        browserSession = await connectTaskBrowser({
+            proxyConfig,
+            headful: DEBUG_HEADFUL,
+            chromiumChannel: CHROMIUM_CHANNEL
+        });
+        applyCdpEnv(browserSession);
+        browser = browserSession.browser;
+
+        const realUserAgent = browserSession.realUserAgent;
+
+        const viewport = { width: 1920, height: 1080 };
+        const matched = realUserAgent.match(/Chrome\/(\d+)/);
+        const chromeMajor = matched ? Number(matched[1]) : 147;
+
+        const paymentRegion = String(CONFIG.paymentRegionOverride || '').trim().toUpperCase()
+            || await store.getPaymentRegion();
+        const regionCfg = getRegionConfig(paymentRegion);
+        const browserProfile = getRegionBrowserProfile(paymentRegion);
+
+        const contextOptions = {
+            userAgent: realUserAgent,
+            viewport,
+            locale: browserProfile.locale,
+            timezoneId: browserProfile.timezoneId,
+            screen: { width: 1920, height: 1080 },
+            deviceScaleFactor: 1,
+            isMobile: false,
+            hasTouch: false,
+            extraHTTPHeaders: {
+                'sec-ch-ua': `"Not)A;Brand";v="8", "Chromium";v="${chromeMajor}", "Google Chrome";v="${chromeMajor}"`,
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': '"Windows"'
+            }
+        };
+        if (proxyConfig) {
+            contextOptions.proxy = proxyConfig;
+        }
+
+        // 全程录像，便于回看自动化卡在哪一步（输出到挂载目录，前台可播放）
+        if (RECORD_VIDEO) {
+            contextOptions.recordVideo = {
+                dir: VIDEO_DIR,
+                size: { width: 1280, height: 720 }
+            };
+        }
+
+        context = await browser.newContext(contextOptions);
+        const sessionRaw = CONFIG.chatgptSessionJson || CONFIG.chatgptToken;
+        const installResult = await installChatGptSession(context, sessionRaw);
+        const sessionData = installResult?.sessionData || installResult;
+        const cookieVerified = Boolean(installResult?.cookieVerified);
+
+        // ============= 指纹伪装 =============
+        const installBrowserFingerprint = (targetContext) => targetContext.addInitScript((injectedChromeMajor) => {
+            const NavProto = Object.getPrototypeOf(navigator);
+            const ScrProto = Object.getPrototypeOf(screen);
+            const safeDefine = (obj, key, getter) => {
+                try {
+                    Object.defineProperty(obj, key, { get: getter, configurable: true });
+                } catch (_) { /* ignore */ }
+            };
+
+            // 隐藏 webdriver
+            try { delete Object.getPrototypeOf(navigator).webdriver; } catch (_) { }
+            safeDefine(NavProto, 'webdriver', () => undefined);
+            try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true }); } catch (_) { }
+
+            // navigator.userAgentData
+            try {
+                const uaData = {
+                    brands: [
+                        { brand: 'Not)A;Brand', version: '8' },
+                        { brand: 'Chromium', version: String(injectedChromeMajor) },
+                        { brand: 'Google Chrome', version: String(injectedChromeMajor) }
+                    ],
+                    mobile: false,
+                    platform: 'Windows',
+                    getHighEntropyValues: () => Promise.resolve({
+                        architecture: 'x86',
+                        bitness: '64',
+                        mobile: false,
+                        model: '',
+                        platform: 'Windows',
+                        platformVersion: '15.0.0',
+                        wow64: false
+                    }),
+                    toJSON: () => ({ brands: uaData.brands, mobile: uaData.mobile, platform: uaData.platform })
+                };
+                safeDefine(NavProto, 'userAgentData', () => uaData);
+            } catch (_) { }
+
+            // plugins / mimeTypes
+            try {
+                const pdfMime = Object.create(MimeType.prototype);
+                Object.defineProperties(pdfMime, {
+                    type: { get: () => 'application/pdf' },
+                    suffixes: { get: () => 'pdf' },
+                    description: { get: () => 'Portable Document Format' }
+                });
+                const pdfPlugin = Object.create(Plugin.prototype);
+                Object.defineProperties(pdfPlugin, {
+                    name: { get: () => 'Chrome PDF Plugin' },
+                    filename: { get: () => 'internal-pdf-viewer' },
+                    description: { get: () => 'Portable Document Format' },
+                    length: { get: () => 1 },
+                    0: { get: () => pdfMime }
+                });
+                pdfPlugin.item = () => pdfMime;
+                pdfPlugin.namedItem = () => pdfMime;
+
+                const fakePlugins = Object.create(PluginArray.prototype);
+                Object.defineProperties(fakePlugins, {
+                    length: { get: () => 1 },
+                    0: { get: () => pdfPlugin }
+                });
+                fakePlugins.item = () => pdfPlugin;
+                fakePlugins.namedItem = (n) => n === pdfPlugin.name ? pdfPlugin : null;
+                fakePlugins.refresh = () => { };
+
+                const fakeMimeTypes = Object.create(MimeTypeArray.prototype);
+                Object.defineProperties(fakeMimeTypes, {
+                    length: { get: () => 1 },
+                    0: { get: () => pdfMime }
+                });
+                fakeMimeTypes.item = () => pdfMime;
+                fakeMimeTypes.namedItem = (n) => n === pdfMime.type ? pdfMime : null;
+
+                safeDefine(NavProto, 'plugins', () => fakePlugins);
+                safeDefine(NavProto, 'mimeTypes', () => fakeMimeTypes);
+            } catch (_) { }
+
+            // 语言、平台、硬件
+            safeDefine(NavProto, 'languages', () => ['en-US', 'en']);
+            safeDefine(NavProto, 'language', () => 'en-US');
+            safeDefine(NavProto, 'platform', () => 'Win32');
+            safeDefine(NavProto, 'hardwareConcurrency', () => 8);
+            safeDefine(NavProto, 'deviceMemory', () => 8);
+            safeDefine(NavProto, 'maxTouchPoints', () => 0);
+            safeDefine(NavProto, 'vendor', () => 'Google Inc.');
+
+            // navigator.connection
+            try {
+                const conn = { effectiveType: '4g', rtt: 100, downlink: 10, saveData: false };
+                safeDefine(NavProto, 'connection', () => conn);
+            } catch (_) { }
+
+            // window.chrome
+            try {
+                const fakeChrome = {
+                    app: {
+                        isInstalled: false,
+                        InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+                        RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+                        getDetails: () => null,
+                        getIsInstalled: () => false
+                    },
+                    runtime: {
+                        OnInstalledReason: { CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update' },
+                        OnRestartRequiredReason: { APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' },
+                        PlatformArch: { ARM: 'arm', ARM64: 'arm64', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
+                        PlatformNaclArch: { ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
+                        PlatformOs: { ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' },
+                        RequestUpdateCheckStatus: { NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available' },
+                        connect: () => { },
+                        sendMessage: () => { }
+                    },
+                    csi: () => ({ onloadT: Date.now(), pageT: Date.now() - 1000, startE: Date.now() - 2000, tran: 15 }),
+                    loadTimes: () => ({
+                        requestTime: Date.now() / 1000 - 2,
+                        startLoadTime: Date.now() / 1000 - 1.5,
+                        commitLoadTime: Date.now() / 1000 - 1,
+                        finishDocumentLoadTime: Date.now() / 1000 - 0.5,
+                        finishLoadTime: Date.now() / 1000,
+                        firstPaintTime: Date.now() / 1000 - 0.3,
+                        firstPaintAfterLoadTime: 0,
+                        navigationType: 'Other',
+                        wasFetchedViaSpdy: true,
+                        wasNpnNegotiated: true,
+                        npnNegotiatedProtocol: 'h2',
+                        wasAlternateProtocolAvailable: false,
+                        connectionInfo: 'h2'
+                    })
+                };
+                Object.defineProperty(window, 'chrome', { value: fakeChrome, writable: true, configurable: true });
+            } catch (_) { }
+
+            // permissions.query
+            try {
+                const origQuery = navigator.permissions.query.bind(navigator.permissions);
+                navigator.permissions.query = (params) => {
+                    if (params && params.name === 'notifications') {
+                        return Promise.resolve({ state: typeof Notification !== 'undefined' ? Notification.permission : 'default', onchange: null });
+                    }
+                    return origQuery(params).catch(() => ({ state: 'prompt', onchange: null }));
+                };
+            } catch (_) { }
+
+            // screen
+            safeDefine(ScrProto, 'availHeight', () => 1032);
+            safeDefine(ScrProto, 'availWidth', () => 1920);
+            safeDefine(ScrProto, 'colorDepth', () => 24);
+            safeDefine(ScrProto, 'pixelDepth', () => 24);
+            safeDefine(ScrProto, 'width', () => 1920);
+            safeDefine(ScrProto, 'height', () => 1080);
+
+            // Canvas 微噪声
+            try {
+                const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+                HTMLCanvasElement.prototype.toDataURL = function (...args) {
+                    const ctx = this.getContext('2d');
+                    if (ctx) {
+                        try {
+                            const w = this.width, h = this.height;
+                            if (w > 0 && h > 0) {
+                                const data = ctx.getImageData(0, 0, 1, 1);
+                                data.data[3] = Math.max(1, data.data[3] - 1);
+                                ctx.putImageData(data, 0, 0);
+                            }
+                        } catch (_) { }
+                    }
+                    return origToDataURL.apply(this, args);
+                };
+            } catch (_) { }
+
+            // WebGL
+            try {
+                const fakeWebGL = (gl) => {
+                    const origGetParameter = gl.getParameter.bind(gl);
+                    gl.getParameter = function (param) {
+                        if (param === 0x9245) return 'Google Inc. (Intel)';
+                        if (param === 0x9246) return 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)';
+                        return origGetParameter(param);
+                    };
+                };
+                const origGetCtx = HTMLCanvasElement.prototype.getContext;
+                HTMLCanvasElement.prototype.getContext = function (type, ...args) {
+                    const ctx = origGetCtx.call(this, type, ...args);
+                    if (ctx && (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl')) {
+                        try { fakeWebGL(ctx); } catch (_) { }
+                    }
+                    return ctx;
+                };
+            } catch (_) { }
+
+            // ChromeDriver 痕迹
+            try {
+                for (const key of Object.keys(window)) {
+                    if (/^(cdc_|\$cdc_|_phantom|callPhantom|webdriver-|driver-)/.test(key)) {
+                        try { delete window[key]; } catch (_) { }
+                    }
+                }
+            } catch (_) { }
+
+            // Notification.permission
+            try {
+                if (typeof Notification !== 'undefined') {
+                    Object.defineProperty(Notification, 'permission', { get: () => 'default', configurable: true });
+                }
+            } catch (_) { }
+        }, chromeMajor);
+        await installBrowserFingerprint(context);
+
         // --- Phase 0: Proxy Connectivity Check ---
         if (proxyConfig) {
             console.log('正在检查代理连通性...');
@@ -481,7 +482,7 @@ async function run() {
         // --- Phase 1: Resolve payment parameters ---
         const debugOnly = process.env.CHECKOUT_DEBUG_ONLY === '1';
         if (debugOnly) {
-            console.log('[调试] 支付链接调试模式：浏览器注入 Session → Checkout API → 输出链接（不执行支付）');
+            console.log('[调试] 支付链接调试模式：Session → 页面 SDK/API（可回退 UI）→ 输出链接（不执行支付）');
         } else {
             console.log('[1] 准备自助充值流程...');
         }
@@ -522,7 +523,10 @@ async function run() {
         }
 
         // --- Phase 2: API 创建 Checkout（注入账单地区），失败时回退 UI 定价页 ---
-        const checkoutMode = String(process.env.CHECKOUT_MODE || 'api').toLowerCase();
+        const checkoutMode = String(process.env.CHECKOUT_MODE || 'auto').trim().toLowerCase();
+        if (!['auto', 'api', 'ui'].includes(checkoutMode)) {
+            throw new Error(`不支持的 CHECKOUT_MODE: ${checkoutMode}（可选 auto/api/ui）`);
+        }
         let checkoutOpened = false;
         let checkoutResult = null;
         const planNameOverride = String(CONFIG.planNameOverride || '').trim() || undefined;
@@ -540,27 +544,51 @@ async function run() {
                 checkoutOpened = true;
             } catch (apiError) {
                 console.warn(`[Warn] API Checkout 失败: ${apiError.message}`);
-                if (debugOnly) {
-                    throw apiError;
-                }
                 if (checkoutMode === 'api') {
-                    console.log('[Info] 正在回退到 UI 定价页流程...');
-                } else {
                     throw apiError;
                 }
+                console.log('[Info] 正在回退到 UI 定价页流程...');
             }
         }
 
         if (!checkoutOpened) {
-            if (debugOnly) {
-                throw new Error('API Checkout 失败，调试模式不启用 UI 定价页');
+            const uiHeadful = process.env.CHECKOUT_UI_HEADFUL !== '0';
+            if (uiHeadful && !(browserSession.mode === 'standalone' && browserSession.headful)) {
+                console.log('[Checkout] 启动独立有头浏览器进行 UI 备用流程（不复用无头池）...');
+                const storageState = await context.storageState();
+                await finalizeVideo(context, page);
+                await closeTaskBrowser(browserSession, browser);
+                context = null;
+                page = null;
+                browser = null;
+                browserSession = null;
+
+                browserSession = await connectTaskBrowser({
+                    proxyConfig,
+                    headful: true,
+                    forceStandalone: true,
+                    chromiumChannel: CHROMIUM_CHANNEL
+                });
+                applyCdpEnv(browserSession);
+                browser = browserSession.browser;
+                context = await browser.newContext({ ...contextOptions, storageState });
+                const fallbackSession = await installChatGptSession(context, sessionRaw);
+                // Session 安装会重新注入原始 Cookie；随后恢复本次浏览器刷新过的值。
+                await context.addCookies(storageState.cookies);
+                await installBrowserFingerprint(context);
+                page = await context.newPage();
+                await bootstrapChatGptSession(page, sessionRaw, {
+                    sessionData: fallbackSession.sessionData,
+                    cookieVerified: fallbackSession.cookieVerified
+                });
             }
             console.log('🧭 [步骤] 正在打开定价页并选择升级套餐...');
-            await openPricingCheckout(page, {
+            const checkoutUrl = await openPricingCheckout(page, {
                 region: billingCountry,
-                planType
+                planType,
+                planNameOverride
             });
-            checkoutResult = { checkoutUrl: page.url() };
+            checkoutResult = { checkoutUrl: checkoutUrl || page.url() };
         }
 
         if (debugOnly) {

@@ -6,6 +6,18 @@
 
 const { connectStandaloneBrowser } = require('./browser-standalone');
 const { connectPoolBrowser } = require('./browser-pool-client');
+const net = require('net');
+
+function availableCdpPort() {
+    return new Promise((resolve, reject) => {
+        const server = net.createServer();
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', () => {
+            const port = server.address().port;
+            server.close((error) => error ? reject(error) : resolve(port));
+        });
+    });
+}
 
 function resolveBrowserRuntimeMode(env = process.env) {
     const explicit = String(env.BROWSER_RUNTIME_MODE || '').trim().toLowerCase();
@@ -25,8 +37,10 @@ function resolveBrowserRuntimeMode(env = process.env) {
 async function connectTaskBrowser(options = {}) {
     const env = options.env || process.env;
     const mode = resolveBrowserRuntimeMode(env);
+    // 已存在的无头池无法切换成有头；显式有头任务必须独立启动。
+    const forceStandalone = options.forceStandalone === true || options.headful === true;
 
-    if (mode === 'pool') {
+    if (mode === 'pool' && !forceStandalone) {
         return connectPoolBrowser({
             poolCdpUrl: env.BROWSER_POOL_CDP_URL,
             poolSlotId: env.BROWSER_POOL_SLOT
@@ -37,7 +51,7 @@ async function connectTaskBrowser(options = {}) {
         proxyConfig: options.proxyConfig,
         headful: options.headful,
         chromiumChannel: options.chromiumChannel || env.CHROMIUM_CHANNEL,
-        cdpPort: env.CDP_PORT
+        cdpPort: forceStandalone ? await availableCdpPort() : env.CDP_PORT
     });
 }
 

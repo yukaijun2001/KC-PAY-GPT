@@ -232,12 +232,55 @@ sudo certbot --nginx -d your-domain.com
 
 ## 常见问题
 
+### Q: Checkout 提示 unusual activity / UI 备用流程如何启用？
+
+默认链路为 `页面 Sentinel SDK → 同会话 API → 失败时独立有头 UI → 输出链接`。
+后台“支付链接调试”也使用此链路，拿到链接即停止，不填写银行卡、不提交付款。
+
+```env
+CHECKOUT_MODE=auto
+CHECKOUT_UI_HEADFUL=1
+CHECKOUT_SENTINEL_TIMEOUT_MS=15000
+CHECKOUT_API_TIMEOUT_MS=30000
+```
+
+- `auto`：API 失败或 SDK 加载/取 token 超时后，回退一次 UI 定价页。
+- `api`：只调用 API，失败直接返回错误，用于单独定位问题。
+- `ui`：直接走 UI 定价页。
+- `CHECKOUT_UI_HEADFUL=1`：UI 阶段不复用无头浏览器池；保存 Cookie/localStorage，保留 Session 和代理，另起有头 Chromium。
+- `CHECKOUT_UI_HEADFUL=0`：UI 阶段沿用当前浏览器，适合不需要有头的部署。
+
+UI 发出创建请求前会核对实际 `plan_name`、country 和 currency。
+若页面当前选择了另一个 Pro 档位或忽略自定义套餐，会明确返回不匹配错误，不会静默创建不同套餐的链接。
+
+SDK token 由当前页面实时获取，不从配置中硬编码或缓存。
+`unusual activity` 可能同时涉及 Session、账号或网络状态；补充 SDK 请求上下文不保证上游一定接受。
+查看任务日志，分别确认 `[Checkout] 使用当前页面 Sentinel SDK`、`正在回退到 UI`、`CHECKOUT_DEBUG_SUCCESS`；只有最后一个标记才表示本次调试返回了链接。
+
+Docker 新镜像已包含 Xvfb，默认 `XVFB_ENABLED=1` 自动提供虚拟显示。增加依赖后须**重建镜像**，仅重启旧容器无效：
+
+```bash
+docker compose up -d --build app
+docker compose logs -f app
+```
+
+Xvfb 是虚拟显示，不是 VNC/远程桌面；需要人工操作浏览器时使用本机桌面或自行连接图形会话。
+
 ### Q: Chromium 启动失败 (Linux 无图形界面)
 
-确保使用 `HEADFUL=0`（默认无头模式），并安装了所有系统依赖：
+安装所有系统依赖：
 ```bash
 npx playwright install-deps chromium
 ```
+
+裸机 Linux 使用有头 UI 时还需要 DISPLAY。无桌面服务器可执行：
+
+```bash
+sudo apt-get install -y xvfb xauth
+xvfb-run -a -s '-screen 0 1920x1080x24 -nolisten tcp' node server.js
+```
+
+macOS/Windows 桌面无需 Xvfb。若只需现有无头 UI，可设 `CHECKOUT_UI_HEADFUL=0`。
 
 ### Q: Docker 中浏览器崩溃
 

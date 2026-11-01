@@ -3,6 +3,7 @@
 const { getRegionConfig } = require('./region-config');
 const { assertChatGptLoggedIn } = require('./session-auth');
 const { clearHumanVerification } = require('./human-verification');
+const { resolvePlanName } = require('./mysql-store');
 
 const PRICING_URL = 'https://chatgpt.com/#pricing';
 
@@ -717,16 +718,20 @@ async function clickPlanUpgrade(page, planType) {
     throw new Error(`未找到 ${plan} 套餐的升级按钮，请确认账号可升级且 Session 已登录`);
 }
 
-async function waitForCheckoutPage(page, timeout = 90000) {
+async function waitForCheckoutPage(page, timeout = 90000, failureMessage = () => '') {
     console.log('💳 [步骤] 等待跳转到 Checkout 配置套餐页...');
     const deadline = Date.now() + timeout;
 
     while (Date.now() < deadline) {
+        const failure = await failureMessage();
+        if (failure) throw new Error(failure);
         const url = page.url();
         if (url.includes('/checkout/') || url.includes('chatgpt.com/checkout')) {
             await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
             await page.waitForTimeout(2000);
             await assertChatGptLoggedIn(page, 'Checkout');
+            const lateFailure = await failureMessage();
+            if (lateFailure) throw new Error(lateFailure);
             console.log(`✅ [步骤] Checkout 页面已打开: ${url.slice(0, 80)}...`);
             return url;
         }
@@ -739,13 +744,89 @@ async function waitForCheckoutPage(page, timeout = 90000) {
     throw new Error(`等待 Checkout 页面超时，当前 URL: ${page.url()}`);
 }
 
-async function openPricingCheckout(page, { region, planType }) {
+function validateUiCheckoutPayload(payload, { region, planType, planNameOverride }) {
+    const expectedPlan = planNameOverride || resolvePlanName(planType);
+    if (payload?.plan_name !== expectedPlan) {
+        return `UI Checkout 套餐不匹配：需要 ${expectedPlan}，页面选择 ${payload?.plan_name || 'unknown'}（已停止创建）`;
+    }
+    const expectedCountry = String(region || 'PH').toUpperCase();
+    const expectedCurrency = getRegionConfig(expectedCountry)?.currency;
+    if (payload?.billing_details?.country !== expectedCountry
+        || payload?.billing_details?.currency !== expectedCurrency) {
+        return `UI Checkout 地区不匹配：需要 ${expectedCountry}/${expectedCurrency}（已停止创建）`;
+    }
+    return '';
+}
+
+async function openPricingCheckout(page, { region, planType, planNameOverride }) {
     await waitForPricingPage(page);
     await switchToPersonalPlans(page);
     await selectPricingRegion(page, region);
-    await clickPlanUpgrade(page, planType);
-    const checkoutUrl = await waitForCheckoutPage(page);
-    return checkoutUrl;
+
+    // 两个 Pro 档位共用同类按钮；发出请求前核对实际套餐和账单地区，避免悄悄换档。
+    let requestSeen = false;
+    let failure = '';
+    let failureBody = Promise.resolve();
+    let failureGeneration = 0;
+    const checkoutEndpoint = 'https://chatgpt.com/backend-api/payments/checkout';
+    const checkoutRoute = /^https:\/\/chatgpt\.com\/backend-api\/payments\/checkout(?:\?.*)?$/;
+    const guard = async (route) => {
+        if (route.request().method() !== 'POST') return route.fallback();
+        requestSeen = true;
+        let payload;
+        try { payload = route.request().postDataJSON(); } catch (_) { /* handled below */ }
+        const validationFailure = validateUiCheckoutPayload(payload, { region, planType, planNameOverride });
+        if (validationFailure) {
+            failureGeneration++;
+            failure = validationFailure;
+            failureBody = Promise.resolve();
+            return route.abort('blockedbyclient');
+        }
+        return route.fallback();
+    };
+    const responseListener = (response) => {
+        if (response.url().split('?')[0] === checkoutEndpoint && response.status() >= 400) {
+            const generation = ++failureGeneration;
+            failure = `UI 创建 Checkout 失败 (HTTP ${response.status()})`;
+            let timer;
+            failureBody = Promise.race([
+                Promise.resolve().then(() => response.text()),
+                new Promise((resolve) => { timer = setTimeout(() => resolve(''), 1500); })
+            ]).then((body) => {
+                // Only surface the known diagnostic, never arbitrary response bodies or tokens.
+                let data;
+                try { data = JSON.parse(body); } catch (_) { return; }
+                const detail = typeof data?.detail === 'string' ? data.detail
+                    : (typeof data?.detail?.message === 'string' ? data.detail.message
+                        : (typeof data?.message === 'string' ? data.message
+                            : (typeof data?.error === 'string' ? data.error
+                                : (typeof data?.error?.message === 'string' ? data.error.message : ''))));
+                if (generation === failureGeneration && /unusual activity/i.test(detail)) {
+                    failure += ': Our systems have detected unusual activity. Please try again later.';
+                }
+            }).catch(() => {}).finally(() => clearTimeout(timer));
+        }
+    };
+    await page.route(checkoutRoute, guard);
+    page.on('response', responseListener);
+    try {
+        await clickPlanUpgrade(page, planType);
+        const checkoutUrl = await waitForCheckoutPage(page, 90000, async () => {
+            while (failure) {
+                const pending = failureBody;
+                await pending;
+                if (pending === failureBody) break;
+            }
+            return failure;
+        });
+        if (!requestSeen) {
+            throw new Error('未观察到 UI Checkout 创建请求，无法确认所选套餐/地区');
+        }
+        return checkoutUrl;
+    } finally {
+        page.off('response', responseListener);
+        await page.unroute(checkoutRoute, guard);
+    }
 }
 
 module.exports = {
@@ -756,5 +837,6 @@ module.exports = {
     switchToPersonalPlans,
     clickPlanUpgrade,
     waitForCheckoutPage,
+    validateUiCheckoutPayload,
     pageShowsTargetRegionPricing
 };

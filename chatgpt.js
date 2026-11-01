@@ -4,6 +4,7 @@ const axios = require('axios');
 const store = require('./mysql-store');
 const { getRegionConfig } = require('./region-config');
 const { executePaymentWithRetry } = require('./payment-retry');
+const { requestBrowserCheckout } = require('./checkout-browser-request');
 
 function buildCheckoutPayload(planName, country, currency) {
     const uiMode = String(process.env.CHECKOUT_UI_MODE || 'custom').trim() || 'custom';
@@ -36,13 +37,14 @@ function parseCheckoutApiResponse(status, bodyText) {
     } catch (_) {
         data = {};
     }
+    if (!data || typeof data !== 'object') data = {};
 
-    if (status !== 200) {
+    if (status < 200 || status >= 300) {
         const detail = formatApiErrorDetail(
             data.detail ?? data.message ?? data.error,
             bodyText.slice(0, 500) || `HTTP ${status}`
         );
-        return { ok: false, status, data, error: detail };
+        return { ok: false, status, data, error: detail || `HTTP ${status}` };
     }
 
     const service = new ChatGPTService(null, '');
@@ -52,7 +54,7 @@ function parseCheckoutApiResponse(status, bodyText) {
             ok: false,
             status,
             data,
-            error: `API 未返回 checkout_session_id 或 url: ${JSON.stringify(data).slice(0, 300)}`
+            error: 'API 未返回 checkout_session_id 或 url'
         };
     }
 
@@ -124,10 +126,13 @@ class ChatGPTService {
     /**
      * @param {object} request - Playwright context.request 实例
      * @param {string} token - OpenAI Bearer Token
+     * @param {object} [options]
+     * @param {import('playwright').Page} [options.page] - 已登录页面（启用页面 SDK 请求）
      */
-    constructor(request, token) {
+    constructor(request, token, options = {}) {
         this.request = request;
         this.token = token;
+        this.page = options.page;
         this.headers = {
             "Authorization": `Bearer ${this.token}`,
             "Content-Type": "application/json",
@@ -137,7 +142,7 @@ class ChatGPTService {
 
     /**
      * 从 checkout API 响应解析支付链接
-     * custom 模式：用 checkout_session_id 拼 https://chatgpt.com/checkout/openai_llc/{id}
+     * custom 模式：使用 API 返回的 processor_entity 与 checkout_session_id 构造站内链接
      * hosted 模式：优先使用 API 返回的 url
      */
     resolveCheckoutUrl(data) {
@@ -156,10 +161,16 @@ class ChatGPTService {
             return { sessionId, checkoutUrl: apiUrl };
         }
 
-        if (sessionId) {
+        if (typeof sessionId === 'string' && /^[A-Za-z0-9_-]{1,256}$/.test(sessionId)) {
+            const entity = data.processor_entity == null || data.processor_entity === ''
+                ? 'openai_llc'
+                : data.processor_entity;
+            if (typeof entity !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(entity)) {
+                return { sessionId, checkoutUrl: null };
+            }
             return {
                 sessionId,
-                checkoutUrl: `https://chatgpt.com/checkout/openai_llc/${sessionId}`
+                checkoutUrl: `https://chatgpt.com/checkout/${entity}/${sessionId}`
             };
         }
 
@@ -180,13 +191,23 @@ class ChatGPTService {
             const payload = buildCheckoutPayload(planName, country, currency);
             console.log(`[ChatGPT] 创建 Checkout Session: plan_name=${planName}, country=${country}, currency=${currency}, checkout_ui_mode=${payload.checkout_ui_mode}`);
 
-            const response = await this.request.post("https://chatgpt.com/backend-api/payments/checkout", {
-                headers: this.headers,
-                data: payload
-            });
-
-            const bodyText = await response.text().catch(() => "");
-            const parsed = parseCheckoutApiResponse(response.status(), bodyText);
+            let apiResponse;
+            if (this.page) {
+                console.log('[Checkout] 使用当前页面 Sentinel SDK 与浏览器会话创建链接');
+                apiResponse = await requestBrowserCheckout(this.page, { accessToken: this.token, payload });
+                const diag = apiResponse.diagnostics;
+                const flag = (value) => value == null ? 'unknown' : (value ? 'yes' : 'no');
+                if (diag) {
+                    console.log(`[Checkout] 请求上下文 account=${diag.accountSource} account_matches_token=${flag(diag.accountMatchesToken)} device=${flag(diag.deviceHeaderPresent)} oai_did=${flag(diag.cookieDidPresent)} sentinel_flow=${diag.sentinelFlow} sentinel_device_match=${flag(diag.sentinelDeviceMatches)}`);
+                }
+            } else {
+                const response = await this.request.post('https://chatgpt.com/backend-api/payments/checkout', {
+                    headers: this.headers,
+                    data: payload
+                });
+                apiResponse = { status: response.status(), bodyText: await response.text().catch(() => '') };
+            }
+            const parsed = parseCheckoutApiResponse(apiResponse.status, apiResponse.bodyText);
 
             if (!parsed.ok) {
                 const detail = parsed.error;
@@ -312,7 +333,7 @@ async function activateSubscription({ page, accessToken, planType, cdkCode, emai
 
     // Step 2: Create Checkout Session via OpenAI API
     notify('正在创建 Stripe Checkout Session...');
-    const gpt = new ChatGPTService(page.context().request, accessToken);
+    const gpt = new ChatGPTService(page.context().request, accessToken, { page });
     const checkout = await gpt.createCheckoutSession(planType, country, currency);
 
     if (!checkout.checkoutUrl) {
@@ -391,7 +412,7 @@ async function openApiCheckout(page, { accessToken, planType, country, currency,
     const billingCurrency = String(currency || getRegionConfig(region)?.currency || 'PHP').toUpperCase();
     console.log(`🧭 [步骤] 正在通过 API 创建 Checkout (country=${region}, currency=${billingCurrency}, plan=${planType})...`);
 
-    const gpt = new ChatGPTService(page.context().request, token);
+    const gpt = new ChatGPTService(page.context().request, token, { page });
     const checkout = await gpt.createCheckoutSession(planType, region, billingCurrency, planNameOverride);
     if (!checkout.checkoutUrl) {
         throw new Error(`API 创建 Checkout 失败: ${checkout.error || '未返回 data.url'}`);

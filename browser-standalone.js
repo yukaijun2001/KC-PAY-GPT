@@ -32,6 +32,9 @@ async function probeUserAgent(browser, fallback = DEFAULT_UA) {
  */
 async function connectStandaloneBrowser(options = {}) {
     const headful = options.headful === true;
+    if (headful && process.platform === 'linux' && !process.env.DISPLAY) {
+        throw new Error('有头 UI 需要 DISPLAY：Linux 请在桌面环境或 xvfb-run -a node server.js 下运行');
+    }
     const chromiumChannel = String(options.chromiumChannel || '').trim();
     const cdpPort = String(options.cdpPort || process.env.CDP_PORT || '9222').trim();
 
@@ -39,7 +42,7 @@ async function connectStandaloneBrowser(options = {}) {
         '--disable-blink-features=AutomationControlled',
         `--remote-debugging-port=${cdpPort}`
     ];
-    if (!headful) {
+    if (!headful || (process.platform === 'linux' && process.getuid?.() === 0)) {
         launchArgs.push('--no-sandbox', '--disable-setuid-sandbox');
     }
 
@@ -66,6 +69,7 @@ async function connectStandaloneBrowser(options = {}) {
         mode: 'standalone',
         browser,
         ownsBrowser: true,
+        headful,
         cdpUrl,
         cdpPort,
         realUserAgent: await probeUserAgent(browser)
