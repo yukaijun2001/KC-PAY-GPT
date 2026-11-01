@@ -39,6 +39,10 @@ COPY requirements-hcaptcha.txt ./
 RUN pip install -r requirements-hcaptcha.txt \
     && python3 -m playwright install chromium
 
+# 单独安装显示探针，便于重建时复用上方体积较大的依赖层。
+RUN apt-get update && apt-get install -y --no-install-recommends x11-utils \
+    && rm -rf /var/lib/apt/lists/*
+
 # 复制源码（含 hcaptcha solver）
 COPY . .
 

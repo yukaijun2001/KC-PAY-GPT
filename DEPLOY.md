@@ -32,7 +32,7 @@ sudo systemctl enable docker && sudo systemctl start docker
 ### 2. 配置环境变量
 
 ```bash
-cp .env.example .env
+test -e .env || cp .env.example .env
 nano .env   # 填写 DB_PASSWORD 和 PROXY
 ```
 
@@ -49,7 +49,8 @@ ADMIN_PASSWORD=your_admin_pass     # 后台管理密码
 docker compose up -d
 ```
 
-访问：`http://your-server-ip:3000/admin-login.html`
+示例 `.env` 的访问地址：`http://your-server-ip:28080/admin-login`。
+如果没有设置 `PORT`，Compose 默认使用宿主机 3100；容器内始终使用 3000，具体映射以 `docker compose ps` 为准。后台入口可以在后台修改，`/admin-login.html` 不提供访问。
 
 ### 4. 常用命令
 
@@ -200,7 +201,7 @@ pm2 restart kc-gpt-pay
 
 ## 反向代理（Nginx）
 
-如果需要通过域名访问或使用 HTTPS：
+如果需要通过域名访问或使用 HTTPS，以下示例使用 Docker 的示例宿主机端口 28080；裸机默认使用 3000，其他情况按 `PORT` 调整：
 
 ```nginx
 server {
@@ -209,7 +210,7 @@ server {
 
     # WebSocket 支持
     location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:28080;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -231,6 +232,20 @@ sudo certbot --nginx -d your-domain.com
 ---
 
 ## 常见问题
+
+### Q: 容器运行中但页面打不开或 app 显示 unhealthy？
+
+先确认宿主机映射、应用进程与健康检查结果：
+
+```bash
+docker compose ps -a
+docker compose logs --tail=100 app mysql
+docker inspect --format '{{json .State.Health}}' kc-gpt-pay2-app
+docker compose exec -T app ps -eo pid,ppid,stat,etime,args
+curl -sS -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:28080/
+```
+
+如果修改过 `PORT`，把上面的 28080 换成实际宿主机端口。容器内健康检查连接 `localhost:3000`；若显示连接失败，应先排查 Node 是否启动以及 app 日志，而不是只修改云防火墙。Xvfb 启动失败时新版入口会记录原因并继续启动 Web，但有头浏览器需要可用的 `DISPLAY`。
 
 ### Q: Checkout 提示 unusual activity / UI 备用流程如何启用？
 
@@ -316,5 +331,6 @@ PROXY=http://username:password@proxy-host:port
 
 | 端口 | 用途 |
 |------|------|
-| 3000 | Web 服务 + WebSocket |
-| 3306 | MySQL |
+| 28080 | 示例 `.env` 的 Docker 宿主机 Web 端口；未设置 `PORT` 时为 3100 |
+| 3000 | 容器内 Web 端口；裸机服务默认端口 |
+| 3310 / 3306 | Docker 宿主机 MySQL 端口 / 容器内 MySQL 端口 |

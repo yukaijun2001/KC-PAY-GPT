@@ -66,7 +66,7 @@ sudo systemctl enable docker && sudo systemctl start docker
 ```bash
 git clone https://github.com/KC-CatK/KC-PAY-GPT.git KC-GPT-PAY
 cd KC-GPT-PAY
-cp .env.example .env
+test -e .env || cp .env.example .env
 ```
 
 编辑 `.env`，至少填写：
@@ -75,7 +75,7 @@ cp .env.example .env
 DB_PASSWORD=your_strong_mysql_password   # MySQL root 密码
 ADMIN_PASSWORD=your_admin_password         # 后台登录密码
 PROXY=http://user:pass@proxy-host:port     # 本地自動化或第三方訂單代理（選填）
-BROWSER_POOL=0                              # 預設關閉瀏覽器池
+BROWSER_POOL=0                              # 可选：关闭浏览器池；后台设置优先
 ```
 
 #### 3. 一键启动
@@ -88,8 +88,10 @@ docker compose up -d
 
 | 地址 | 说明 |
 |------|------|
-| `http://服务器IP:3000/` | 用户前台（卡密兑换） |
-| `http://服务器IP:3000/admin-login` | 后台登录（默认路径可在后台修改） |
+| `http://服务器IP:28080/` | 用户前台（卡密兑换） |
+| `http://服务器IP:28080/admin-login` | 后台登录（默认路径可在后台修改） |
+
+示例 `.env` 设置宿主机端口为 28080；未设置 `PORT` 时 Compose 使用 3100。实际端口以 `docker compose ps` 为准。容器内服务始终使用 3000。若后台路径曾被修改，请使用后台配置的路径；`/admin-login.html` 不提供访问。
 
 #### 4. Docker 常用命令
 
@@ -131,7 +133,7 @@ https://kc.vpss.eu.cc/
 
 API Key 至少需要 `plans:read`、`balance:read`、`pay:write` Scope；如需使用任務查詢，另需 `tasks:read`。完整供應商協議見 [對接 API 文件](对接api.md)。
 
-> 瀏覽器池預設關閉（`BROWSER_POOL=0`）。第三方代充模式不使用本地瀏覽器開通流程。
+> 浏览器池未配置时默认启用，可通过 `BROWSER_POOL=0` 关闭；已保存的后台设置优先。第三方代充模式不使用本地浏览器开通流程。
 
 ---
 
@@ -269,7 +271,7 @@ pm2 restart kc-gpt-pay
 
 ### 方式四：Nginx 反向代理 + HTTPS
 
-通过域名访问或启用 HTTPS 时，在 Nginx 中反代到 `127.0.0.1:3000`：
+通过域名访问或启用 HTTPS 时，Docker 示例配置反代到宿主机 `127.0.0.1:28080`；裸机默认使用 3000，其他情况请按 `PORT` 调整：
 
 ```nginx
 server {
@@ -277,7 +279,7 @@ server {
     server_name your-domain.com;
 
     location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:28080;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -318,7 +320,7 @@ sudo certbot --nginx -d your-domain.com
 | **信用卡卡池** | 批量导入、智能选卡、冷却机制、Stripe 拒卡自动报废、失败换卡重试 |
 | **支付地区** | PH / US / SG / MY 可切换，配套免税地址池 |
 | **账单审计** | 自动记录每笔支付，支持筛选与 CSV 导出 |
-| **瀏覽器池** | 本地自動化的可選多槽位模式；目前預設關閉（`BROWSER_POOL=0`） |
+| **瀏覽器池** | 本地自动化的可选多槽位模式；未配置时默认启用，可设 `BROWSER_POOL=0` 关闭 |
 | **hCaptcha** | VLM / 打码平台 / Python solver 多通道 |
 | **反指纹** | Stealth + 30+ 指纹点修正，支持真 Chrome / Edge |
 | **Telegram 通知** | 任务成功 / 失败推送（后台配置） |
@@ -429,8 +431,9 @@ A: 管理员 PowerShell 执行：`Set-ExecutionPolicy -Scope CurrentUser RemoteS
 
 | 端口 | 用途 |
 |------|------|
-| 3000 | Web 服务 + WebSocket（可通过 `PORT` 环境变量修改） |
-| 3306 | MySQL（Docker 模式下映射到宿主机） |
+| 28080 | 示例 `.env` 中的 Docker 宿主机 Web 端口；未设置 `PORT` 时为 3100 |
+| 3000 | 容器内 Web 端口；裸机服务默认端口 |
+| 3310 / 3306 | Docker 宿主机 MySQL 端口 / 容器内 MySQL 端口 |
 | 19222+ | 瀏覽器池 CDP 連接埠（僅啟用 `BROWSER_POOL=1` 時使用） |
 
 ---
