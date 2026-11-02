@@ -345,7 +345,7 @@ sudo certbot --nginx -d your-domain.com
 |------|------|
 | **CDK 兑换** | Go / Plus / Pro 10X / Pro 20X / Pro 50X 五档套餐，一卡一充 |
 | **信用卡卡池** | 批量导入、智能选卡、冷却机制、Stripe 拒卡自动报废、失败换卡重试 |
-| **支付地区** | PH / US / SG / MY 可切换，配套免税地址池 |
+| **支付地区** | PH / US / SG / MY / EG（埃及，EGP）可切换 |
 | **账单审计** | 自动记录每笔支付，支持筛选与 CSV 导出 |
 | **瀏覽器池** | 本地自动化的可选多槽位模式；未配置时默认启用，可设 `BROWSER_POOL=0` 关闭 |
 | **hCaptcha** | VLM / 打码平台 / Python solver 多通道 |

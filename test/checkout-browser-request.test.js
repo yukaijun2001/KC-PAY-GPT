@@ -66,6 +66,13 @@ describe('browser Checkout API', () => {
         }
     });
 
+    it('uses EGP for Egyptian Checkout when currency is not explicitly provided', async () => {
+        const run = browserPage();
+        await openApiCheckout(run.page, { ...checkoutOptions, country: 'EG', currency: undefined });
+        expect(JSON.parse(run.fetch.mock.calls[0][1].body).billing_details).toEqual({ country: 'EG', currency: 'EGP' });
+        expect(run.fetch).toHaveBeenCalledOnce();
+    });
+
     it('gets a fresh SDK token and creates Checkout in the same browser/session', async () => {
         const run = browserPage();
         const result = await openApiCheckout(run.page, checkoutOptions);
