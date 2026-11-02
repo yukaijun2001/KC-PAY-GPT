@@ -21,11 +21,10 @@
                 <span>FISH<span class="brand-divider">/</span>GPT</span>
             </a>
             <nav class="landing-desktop-nav" aria-label="主导航">
-                <a href="#plans" data-open-plans>套餐说明</a>
-                <a href="/subscription">发票助手</a>
+                <a href="/subscription" class="invoice-heartbeat" aria-label="打开发票助手，查询订阅与发票">发票助手</a>
                 <a href="#faq">常见问题</a>
             </nav>
-            <a class="landing-button landing-nav-cta" href="#recharge" data-focus-recharge>开始兑换 <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
+            <a class="landing-button landing-nav-cta" href="#recharge" data-focus-recharge>开始兑换</a>
             <button class="landing-icon-button landing-menu-toggle" id="landing_menu_toggle" type="button" aria-label="打开导航菜单" aria-haspopup="dialog" aria-controls="landing_nav_dialog" aria-expanded="false">
                 <i data-lucide="menu" aria-hidden="true"></i>
             </button>
@@ -37,33 +36,17 @@
             <button class="landing-icon-button" type="button" data-close-nav aria-label="关闭导航菜单"><i data-lucide="x" aria-hidden="true"></i></button>
         </div>
         <nav class="landing-dialog-links" aria-label="移动端导航">
-            <a href="#plans" data-open-plans>套餐说明 <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
-            <a href="/subscription">发票助手 <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
+            <a href="#recharge" data-focus-recharge>开始兑换 <i data-lucide="arrow-right" aria-hidden="true"></i></a>
+            <a href="/subscription" class="invoice-heartbeat" aria-label="打开发票助手，查询订阅与发票">发票助手 <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
             <a href="#faq">常见问题 <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
         </nav>
-        <a class="landing-button landing-dialog-cta" href="#recharge" data-focus-recharge>开始兑换 <i data-lucide="arrow-right" aria-hidden="true"></i></a>
     </dialog>
     <div class="page-shell recharge-shell">
         <section class="recharge-hero" aria-labelledby="recharge-title">
         <header class="site-hero">
             <div class="hero-eyebrow">FISH GPT · 自助订阅</div>
             <h1 id="recharge-title">ChatGPT 订阅<br><span class="shine-text">从这里开始。</span></h1>
-            <p class="hero-subtitle">一张卡密，几步操作。验证后确认套餐，提交 Session，即可继续开通。</p>
-            <div class="hero-actions">
-                <a class="landing-button" href="#recharge" data-focus-recharge>开始兑换 <i data-lucide="arrow-right" aria-hidden="true"></i></a>
-                <a class="landing-text-link" href="#plans" data-open-plans>了解支持套餐 <i data-lucide="arrow-down-right" aria-hidden="true"></i></a>
-            </div>
-            <div class="feature-badges">
-                <span class="feature-badge"><i data-lucide="shield-check"></i> 官方结账</span>
-                <span class="feature-badge"><i data-lucide="zap"></i> 极速开通</span>
-                <span class="feature-badge"><i data-lucide="rotate-ccw"></i> 失败可回滚</span>
-                <a href="/subscription" class="feature-badge feature-link" aria-label="打开发票助手，查询订阅与发票">
-                    <i data-lucide="receipt" aria-hidden="true"></i>
-                    <span>发票助手</span>
-                    <span class="feature-link-hint">点击进入</span>
-                    <i data-lucide="arrow-right" aria-hidden="true"></i>
-                </a>
-            </div>
+            <p class="hero-subtitle">输入卡密，确认套餐后提交 Session。失败会自动回滚，发票可在导航中查询。</p>
         </header>
         <div class="checkout-visual">
             <div class="checkout-glow checkout-glow-purple" aria-hidden="true"></div>
@@ -164,41 +147,12 @@
                 </span>
             </summary>
             <section class="plan-showcase" aria-label="支持的订阅套餐">
-                <article class="plan-card" data-plan-type="go">
-                    <div class="plan-card-head">
-                        <h3>ChatGPT Go</h3>
-                        <span class="plan-tag">Go</span>
-                    </div>
-                    <p>使用 Go 套餐卡密开通；实际权益和可用性以订阅页面为准。</p>
-                </article>
-                <article class="plan-card" data-plan-type="plus">
-                    <div class="plan-card-head">
-                        <h3>ChatGPT Plus</h3>
-                        <span class="plan-tag">标准版</span>
-                    </div>
-                    <p>使用 Plus 套餐卡密开通；实际权益和可用性以订阅页面为准。</p>
-                </article>
-                <article class="plan-card highlight" data-plan-type="pro_10x">
-                    <div class="plan-card-head">
-                        <h3>ChatGPT Pro 10X</h3>
-                        <span class="plan-tag pro">Pro</span>
-                    </div>
-                    <p>使用 Pro 10X 套餐卡密开通；实际权益以订阅页面为准。</p>
-                </article>
-                <article class="plan-card" data-plan-type="pro_20x">
-                    <div class="plan-card-head">
-                        <h3>ChatGPT Pro 20X</h3>
-                        <span class="plan-tag pro">Pro</span>
-                    </div>
-                    <p>使用 Pro 20X 套餐卡密开通；实际权益以订阅页面为准。</p>
-                </article>
-                <article class="plan-card" data-plan-type="pro_50x">
-                    <div class="plan-card-head">
-                        <h3>ChatGPT Pro 50X</h3>
-                        <span class="plan-tag pro">Pro</span>
-                    </div>
-                    <p>使用 Pro 50X 套餐卡密开通；实际权益以订阅页面为准。</p>
-                </article>
+                <p class="plan-note">实际权益和可用性以 ChatGPT 订阅页面为准。</p>
+                <article class="plan-card" data-plan-type="go"><h3>ChatGPT Go</h3><span class="plan-tag">Go</span></article>
+                <article class="plan-card" data-plan-type="plus"><h3>ChatGPT Plus</h3><span class="plan-tag">标准版</span></article>
+                <article class="plan-card highlight" data-plan-type="pro_10x"><h3>ChatGPT Pro 10X</h3><span class="plan-tag pro">Pro</span></article>
+                <article class="plan-card" data-plan-type="pro_20x"><h3>ChatGPT Pro 20X</h3><span class="plan-tag pro">Pro</span></article>
+                <article class="plan-card" data-plan-type="pro_50x"><h3>ChatGPT Pro 50X</h3><span class="plan-tag pro">Pro</span></article>
             </section>
         </details>
         </section>
@@ -212,7 +166,6 @@
         </details>
         <footer class="landing-footer" data-reveal>
             <span>FISH GPT<span class="footer-dot">·</span>自助订阅服务</span>
-            <a href="/subscription">订阅查询与发票 <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
         </footer>
     </div>
 

@@ -8,18 +8,18 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --primary: #2563eb;
-            --primary-hover: #1d4ed8;
-            --primary-soft: #eff6ff;
-            --bg: #f4f7fb;
-            --panel: #ffffff;
-            --border: #e5e7eb;
-            --text: #0f172a;
-            --text-dim: #64748b;
-            --error: #ef4444;
-            --success: #059669;
-            --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.10);
-            --shadow-focus: 0 0 0 4px rgba(37, 99, 235, 0.14);
+            --primary: #171717;
+            --primary-hover: #333333;
+            --primary-soft: #f5f3ff;
+            --bg: #ffffff;
+            --panel: #ffffffcf;
+            --border: #e7e7ea;
+            --text: #111114;
+            --text-dim: #707078;
+            --error: #dc2626;
+            --success: #24866a;
+            --shadow-lg: 0 0 0 1px #e8e5f099, 0 22px 70px #4535730d;
+            --shadow-focus: 0 0 0 3px #7c3aed1a;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Outfit', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; }
         body {
@@ -27,9 +27,11 @@
             display: grid;
             place-items: center;
             background:
-                radial-gradient(circle at 12% 8%, rgba(37, 99, 235, 0.10), transparent 45%),
-                radial-gradient(circle at 90% 92%, rgba(14, 165, 233, 0.08), transparent 45%),
+                linear-gradient(#0000000b 1px, transparent 1px),
+                linear-gradient(90deg, #0000000b 1px, transparent 1px),
+                radial-gradient(circle at 78% 12%, #ddd6fe66, transparent 28%),
                 var(--bg);
+            background-size: 60px 60px, 60px 60px, auto, auto;
             color: var(--text);
             padding: 24px;
         }
@@ -38,8 +40,9 @@
             max-width: 440px;
             background: var(--panel);
             border: 1px solid var(--border);
-            border-radius: 20px;
+            border-radius: 24px;
             padding: 36px;
+            backdrop-filter: blur(12px);
             box-shadow: var(--shadow-lg);
         }
         h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
@@ -71,7 +74,8 @@
         }
         button.secondary {
             background: #fff;
-            color: var(--primary);
+            color: #45454d;
+            border-color: #e4e1e9;
             margin-top: 10px;
         }
         button:disabled { opacity: 0.6; cursor: not-allowed; }

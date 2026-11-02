@@ -26,8 +26,12 @@ describe('public recharge page contract', () => {
         expect(html).not.toContain('/api/public/runtime');
         expect(html).not.toContain('/api/public/payment-region');
         const invoice = fs.readFileSync(path.join(publicDir, 'subscription.html'), 'utf8');
+        expect(invoice).toContain('invoice-page');
+        expect(invoice).toContain('/recharge-ui.css');
         expect(invoice).toContain('notice-banner');
         expect(invoice).toContain('Go / Plus / Pro');
+        expect(html).not.toContain('>套餐说明<');
+        expect(html).toContain('invoice-heartbeat');
     });
 });
 
@@ -133,11 +137,13 @@ describe.skipIf(!browserAvailable)('public recharge page in Chromium (mocked bac
     it('shows the invoice entry hint and navigates to the existing invoice assistant', async () => {
         const { context, page, errors } = await openPage();
         try {
-            const entry = page.getByRole('link', { name: '打开发票助手，查询订阅与发票' });
-            expect(await entry.locator('.feature-link-hint').textContent()).toBe('点击进入');
+            const entry = page.getByRole('link', { name: '打开发票助手，查询订阅与发票' }).first();
+            expect(await entry.evaluate(element => getComputedStyle(element).animationName)).toContain('invoice-heartbeat');
             await entry.click();
             await page.waitForURL('**/subscription');
             expect(await page.getByRole('heading', { name: '发票助手', exact: true }).isVisible()).toBe(true);
+            expect(await page.locator('body').getAttribute('class')).toContain('invoice-page');
+            expect(await page.locator('.landing-brand').isVisible()).toBe(true);
             expect(await page.locator('#checkBtn').isVisible()).toBe(true);
             expect(errors).toEqual([]);
         } finally {
@@ -165,7 +171,7 @@ describe.skipIf(!browserAvailable)('public recharge page in Chromium (mocked bac
         } finally { await context.close(); }
     });
 
-    it('closes the menu on its backdrop and opens plans from the mobile navigation', async () => {
+    it('closes the menu on its backdrop and opens plans from the page link', async () => {
         const { context, page, errors } = await openPage({ viewport: { width: 390, height: 844 } });
         try {
             const toggle = page.locator('#landing_menu_toggle');
@@ -174,9 +180,7 @@ describe.skipIf(!browserAvailable)('public recharge page in Chromium (mocked bac
             await page.mouse.click(8, 180);
             await dialog.waitFor({ state: 'hidden' });
             await page.locator('#cdkInput').fill('TEST-KEEP-INPUT');
-            await toggle.click();
-            await dialog.getByRole('link', { name: '套餐说明' }).click();
-            await dialog.waitFor({ state: 'hidden' });
+            await page.locator('.plan-summary').click();
             await page.waitForFunction(() => document.getElementById('plans').open);
             expect(await page.locator('#cdkInput').inputValue()).toBe('TEST-KEEP-INPUT');
             expect(await page.locator('.plan-summary').evaluate(element => document.activeElement === element)).toBe(true);

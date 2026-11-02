@@ -1,20 +1,35 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="recharge-document">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>发票助手 | AI 自助充值中心</title>
+    <title>发票助手 | FISH GPT</title>
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/recharge-ui.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 
-<body class="recharge-page subscription-page">
-    <div class="page-shell">
+<body class="recharge-page invoice-page" id="top">
+    <div class="recharge-grid" aria-hidden="true"></div>
+    <header class="landing-header" id="landing_header">
+        <div class="landing-header-inner">
+            <a class="landing-brand" href="/" aria-label="返回 FISH GPT 充值页">
+                <img src="/images/gpt-logo.png" alt="" width="28" height="28">
+                <span>FISH<span class="brand-divider">/</span>GPT</span>
+            </a>
+            <nav class="landing-desktop-nav" aria-label="主导航">
+                <a href="/subscription" class="invoice-heartbeat" aria-current="page">发票助手</a>
+                <a href="/#faq">常见问题</a>
+            </nav>
+            <a class="landing-button landing-nav-cta" href="/#recharge">开始兑换 <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
+        </div>
+    </header>
+    <div class="page-shell recharge-shell">
         <header class="site-hero compact-hero">
-            <a href="/" class="back-home-link"><i data-lucide="arrow-left"></i> 返回充值中心</a>
+            <a href="/" class="back-home-link"><i data-lucide="arrow-left"></i> 返回充值页</a>
             <h1>发票助手</h1>
             <p class="hero-subtitle">粘贴 Session 即可查询当前订阅状态，并跳转 OpenAI 官方账单页面下载发票。</p>
         </header>
@@ -225,7 +240,7 @@
 
         function renderRow(label, value, valueClass = '') {
             const strongClass = valueClass ? ` class="${valueClass}"` : '';
-            return `<div class="query-row"><span>${label}</span><strong${strongClass}>${value}</strong></div>`;
+            return `<div class="result-row"><span>${label}</span><b${strongClass}>${value}</b></div>`;
         }
 
         function renderResult(data) {
