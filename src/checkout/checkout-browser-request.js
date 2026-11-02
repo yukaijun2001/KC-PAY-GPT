@@ -6,7 +6,7 @@ const CHATGPT_ORIGIN = 'https://chatgpt.com';
 
 function positiveTimeout(value, fallback) {
     const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    return Number.isFinite(parsed) && parsed > 0 && parsed <= 2147483647 ? parsed : fallback;
 }
 
 /**
@@ -20,52 +20,155 @@ async function requestBrowserCheckout(page, { accessToken, payload }) {
 
     const tokenAccountId = extractProfileFromToken(accessToken).accountId;
 
-    return page.evaluate(async ({ accessToken, payload, tokenAccountId, sentinelTimeoutMs, requestTimeoutMs }) => {
+    return page.evaluate(async ({ accessToken, payload, tokenAccountId, sentinelInitTimeoutMs, sentinelTimeoutMs, requestTimeoutMs }) => {
         if (location.origin !== 'https://chatgpt.com') {
             throw new Error('Checkout API 页面已离开 https://chatgpt.com');
         }
 
-        const withTimeout = async (operation, timeoutMs, message) => {
+        // 不依赖 loader 私有队列或固定版本 URL。观察公开 SDK 引用的交接，
+        // 旧 init/token pending 不能阻塞已经可用的新实现。
+        const sentinel = await new Promise((resolve, reject) => {
+            const startedAt = Date.now();
+            const initDeadline = startedAt + sentinelInitTimeoutMs;
+            const initializations = [];
+            const implementations = [];
+            let tokenStartedAt = null;
+            let tokenDeadline = null;
+            let stage = 'load';
             let timer;
-            try {
-                return await Promise.race([
-                    Promise.resolve().then(operation),
-                    new Promise((_, reject) => {
-                        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
-                    })
-                ]);
-            } finally {
-                clearTimeout(timer);
-            }
-        };
+            let stopped = false;
+            let seenSdk = false;
+            let script;
+            let scriptFailed = false;
+            let scriptLoaded = false;
 
-        const sentinelToken = await withTimeout(async () => {
-            if (typeof window.SentinelSDK?.token !== 'function') {
-                await new Promise((resolve, reject) => {
-                    const script = document.createElement('script');
-                    script.src = '/backend-api/sentinel/sdk.js';
-                    script.async = true;
-                    script.onload = resolve;
-                    script.onerror = () => reject(new Error('Sentinel SDK 加载失败'));
-                    document.head.appendChild(script);
-                });
+            const finish = (message, token) => {
+                if (stopped) return;
+                stopped = true;
+                clearTimeout(timer);
+                if (script) {
+                    script.onload = null;
+                    script.onerror = null;
+                    if (message) script.remove?.(); // 仅移除本次创建的脚本。
+                }
+                const now = Date.now();
+                if (message) {
+                    reject(new Error(`${message} (stage=${stage}, elapsed_ms=${now - startedAt})`));
+                } else {
+                    resolve({ token, timings: {
+                        initMs: tokenStartedAt - startedAt,
+                        tokenMs: now - tokenStartedAt,
+                        handoffs: Math.max(0, implementations.length - 1)
+                    } });
+                }
+            };
+            const schedule = (delay = 0) => {
+                if (stopped) return;
+                clearTimeout(timer);
+                timer = setTimeout(tick, delay);
+            };
+            // 迟到的第三方 Promise 无法取消，但只更新已停止的本地记录；
+            // 不再调用 token，也不会继续到 Checkout fetch。
+            const invoke = (entry, method, state) => {
+                entry[state] = 'pending';
+                try {
+                    Promise.resolve(method.call(entry.sdk, 'chatgpt_checkout')).then(value => {
+                        if (stopped) return;
+                        entry[state] = 'fulfilled';
+                        if (state === 'tokenState') entry.value = value;
+                        schedule();
+                    }, () => {
+                        if (stopped) return;
+                        entry[state] = 'rejected';
+                        schedule();
+                    });
+                } catch (_) {
+                    entry[state] = 'rejected';
+                }
+            };
+            function tick() {
+                if (stopped) return;
+                clearTimeout(timer);
+                const deadline = tokenDeadline ?? initDeadline;
+                if (Date.now() >= deadline) {
+                    finish('Sentinel SDK 等待超时');
+                    return;
+                }
+                if (scriptFailed) {
+                    stage = 'load';
+                    finish('Sentinel SDK 加载失败');
+                    return;
+                }
+                const sdk = window.SentinelSDK;
+                const init = sdk?.init;
+                const token = sdk?.token;
+                if (typeof token !== 'function') {
+                    stage = scriptLoaded || seenSdk ? 'ready' : 'load';
+                    const existingScript = document.querySelector?.('script[src="/backend-api/sentinel/sdk.js"], script[src="https://chatgpt.com/backend-api/sentinel/sdk.js"]');
+                    if (!script && !seenSdk && !existingScript) {
+                        script = document.createElement('script');
+                        script.src = '/backend-api/sentinel/sdk.js';
+                        script.async = true;
+                        script.onload = () => { scriptLoaded = true; schedule(); };
+                        script.onerror = () => { scriptFailed = true; schedule(); };
+                        try { document.head.appendChild(script); } catch (_) { scriptFailed = true; }
+                    }
+                } else {
+                    seenSdk = true;
+                    let initialization = initializations.find(item => item.sdk === sdk && item.init === init);
+                    if (!initialization) {
+                        initialization = { sdk, init, initialToken: token, initState: 'new', handedOff: false };
+                        initializations.push(initialization);
+                    }
+                    let entry = implementations.find(item => item.sdk === sdk && item.token === token);
+                    if (!entry) {
+                        entry = { sdk, token, tokenState: 'new' };
+                        implementations.push(entry);
+                    }
+                    stage = 'init';
+                    // init 可能原位安装 token，不能因 token 换了引用重复 init。
+                    if (initialization.initState === 'new') {
+                        if (typeof init === 'function') invoke(initialization, init, 'initState');
+                        else initialization.initState = 'fulfilled';
+                    }
+                    // loader 的 init 本身也可能一直 pending；token 原位交接后
+                    // 使用新函数，不再被旧 init 卡住或被其迟到 rejection 推翻。
+                    if (initialization.initialToken !== token) initialization.handedOff = true;
+                    if (initialization.initState === 'rejected' && !initialization.handedOff) {
+                        finish('Sentinel SDK 初始化失败');
+                        return;
+                    }
+                    if (initialization.initState === 'fulfilled' || initialization.handedOff) {
+                        stage = 'token';
+                        if (entry.tokenState === 'new') {
+                            // 只分配一次 token 预算；SDK 多次交接不延长 deadline。
+                            if (tokenDeadline === null) {
+                                tokenStartedAt = Date.now();
+                                tokenDeadline = tokenStartedAt + sentinelTimeoutMs;
+                            }
+                            invoke(entry, token, 'tokenState');
+                        }
+                        if (entry.tokenState === 'rejected') {
+                            finish('Sentinel SDK 获取 token 失败');
+                            return;
+                        }
+                        if (entry.tokenState === 'fulfilled') {
+                            let value;
+                            try {
+                                value = typeof entry.value === 'string' ? entry.value.trim()
+                                    : entry.value && JSON.stringify(entry.value);
+                            } catch (_) { /* invalid SDK result */ }
+                            if (!value || value === '{}' || value === 'null') finish('Sentinel SDK 返回空 token');
+                            else finish(null, value);
+                            return;
+                        }
+                    }
+                }
+                schedule(Math.min(25, Math.max(0, (tokenDeadline ?? initDeadline) - Date.now())));
             }
-            const sdk = window.SentinelSDK;
-            if (typeof sdk?.token !== 'function') {
-                throw new Error('Sentinel SDK 不可用');
-            }
-            if (typeof sdk.init === 'function') {
-                await sdk.init('chatgpt_checkout');
-            }
-            // SDK loader 的 init 会在脚本加载后替换 window.SentinelSDK 对象。
-            // 不能保留 loader 的旧 token stub，否则后续调用会永远排队。
-            const result = await window.SentinelSDK.token('chatgpt_checkout');
-            const token = typeof result === 'string' ? result.trim() : result && JSON.stringify(result);
-            if (!token || token === '{}' || token === 'null') {
-                throw new Error('Sentinel SDK 返回空 token');
-            }
-            return token;
-        }, sentinelTimeoutMs, 'Sentinel SDK 获取 token 超时');
+            tick();
+        });
+        const sentinelToken = sentinel.token;
 
         const headers = {
             Authorization: `Bearer ${accessToken}`,
@@ -108,6 +211,7 @@ async function requestBrowserCheckout(page, { accessToken, payload }) {
             ? (sentinelData.flow === 'chatgpt_checkout' ? 'match' : 'different')
             : 'unknown';
         const diagnostics = {
+            sentinelTimings: sentinel.timings,
             accountSource: candidate?.[0] || 'none',
             accountMatchesToken: accountId && validAccountId(tokenAccountId) ? accountId === tokenAccountId : null,
             deviceHeaderPresent: Boolean(deviceId),
@@ -140,7 +244,8 @@ async function requestBrowserCheckout(page, { accessToken, payload }) {
         accessToken,
         payload,
         tokenAccountId,
-        sentinelTimeoutMs: positiveTimeout(process.env.CHECKOUT_SENTINEL_TIMEOUT_MS, 15000),
+        sentinelInitTimeoutMs: positiveTimeout(process.env.CHECKOUT_SENTINEL_INIT_TIMEOUT_MS, 30000),
+        sentinelTimeoutMs: positiveTimeout(process.env.CHECKOUT_SENTINEL_TIMEOUT_MS, 30000),
         requestTimeoutMs: positiveTimeout(process.env.CHECKOUT_API_TIMEOUT_MS, 30000)
     });
 }

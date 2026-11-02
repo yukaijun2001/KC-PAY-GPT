@@ -170,3 +170,51 @@ flowchart TD
 验证：新增的三个档位测试在修复前均复现了“直接点击当前档位”，修复后通过。真实 Chromium 的本地 DOM 测试还覆盖精简页展开、延迟 radio、整卡重绘、已选中、缺档、禁用、状态未更新、重复卡片及卡片外数字干扰。`npm test -- --reporter=dot --silent`：19 个文件、207 项测试通过；语法检查和 `git diff --check` 通过。
 
 本轮未访问真实订阅页、未创建真实 Checkout、未付款；没有修改 Sentinel 超时处理。本地选择器验证不代表线上风控已解决，也不代表代码已推送或部署。
+
+## 2026-11-02：Sentinel SDK 异步交接与超时生命周期修复
+
+### 可重复的代码缺陷
+
+在实际 `requestBrowserCheckout` 的 VM 回归中，旧实现出现四项失败：`init` 返回 void 后延迟替换 SDK、旧 `init` 一直 pending 但 SDK 已替换、token 函数原位替换、初始化超过超时后仍迟到调用 token。前两种初始化行为是同类交接缺陷的两个变体。
+
+这些结果证明本地代码存在异步缺陷，不证明线上日志中的全部超时均由它们导致；上游资源加载、代理出口和账号状态仍可能独立失败。
+
+### 修改
+
+- `src/checkout/checkout-browser-request.js`：按 `(SDK 对象, init 函数)` 保存初始化状态，按 `(SDK 对象, token 函数)` 保存 token 状态。轮询当前实现引用，旧 Promise 不阻塞新实现，同实现不会被周期性重调。
+- `init` 原位安装新 token 不触发重复初始化；pending loader init 在 token 交接后不再阻塞，也不会因旧 init 迟到 rejection 推翻新实现。
+- SDK 加载/初始化和 token 生成分开计时，默认各 30 秒；同阶段使用绝对 deadline，反复交接不会延长预算。已有显式配置保持优先。
+- 结束时清理本方定时器、注入脚本处理器；失败时只移除自己创建的脚本，不删除页面已有脚本。第三方 Promise 或脚本本身可能继续执行，但本方不会因此继续调用 token 或提交 Checkout。
+- 保留单次 Checkout API POST、同页面 Cookie/代理/网络栈和既有 `auto` UI 回退。没有增加自动重发、缓存/伪造 token 或其他厂商 token。
+- `src/checkout/chatgpt.js`：成功时输出阶段耗时与交接次数；失败只含固定错误、阶段和耗时，不透传 SDK 异常正文或 token。
+
+Alibaba 等 SDK 的异步加载模式只能作为工程设计参考。本轮没有接入 Alibaba SDK，也没有将其风控协议或 token 混用于 Sentinel。
+
+```mermaid
+flowchart TD
+    A[当前已登录页面] --> B[加载或等待页面 SDK]
+    B --> C[初始化：按 SDK/init 记录一次]
+    C --> D{当前 SDK/token 已交接?}
+    D -->|是| C2[采用当前实现，不等待旧 stub]
+    C2 --> E[独立 token 预算：当前实现调用一次]
+    D -->|否且初始化完成| E
+    E -->|交接| C2
+    E -->|有效 token| F[单次页面 Checkout POST]
+    B -->|超时或错误| X[停止本方续跑并清理]
+    C -->|超时或错误| X
+    E -->|超时或错误| X
+    X --> G[既有 auto 模式 UI 回退]
+```
+
+### 验证
+
+```bash
+npx vitest run test/checkout-browser-request.test.js test/sentinel-browser-lifecycle.test.js --reporter=dot --silent
+npm test -- --reporter=dot --silent
+git diff --check
+```
+
+- 定向测试：两个文件、57 项通过。包含预算边界、重复交接、SDK 接收者 `this`、pending/迟到 rejection、脚本所有权和清理、单次 POST、不输出私密错误正文。
+- 全量测试：20 个文件、229 项通过；修改文件的 Node 语法检查和 `git diff --check` 通过。
+- 真实 Chromium 的四项测试拦截全部网络，仅使用本地响应和全新 context：pending init 交接、token 原位交接、超时后脚本确实执行但不续跑、token 迟到结果不提交；无真实 Cookie 或实际 Checkout。
+- 未在真实账号上验证上游 Sentinel 是否签发 token，未提交真实支付；因此不能将本地测试或健康检查等同于线上风控已通过。

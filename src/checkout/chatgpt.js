@@ -207,6 +207,10 @@ class ChatGPTService {
                 const diag = apiResponse.diagnostics;
                 const flag = (value) => value == null ? 'unknown' : (value ? 'yes' : 'no');
                 if (diag) {
+                    if (diag.sentinelTimings) {
+                        const { initMs, tokenMs, handoffs } = diag.sentinelTimings;
+                        console.log(`[Checkout] Sentinel 就绪 init_ms=${initMs} token_ms=${tokenMs} handoffs=${handoffs}`);
+                    }
                     console.log(`[Checkout] 请求上下文 account=${diag.accountSource} account_matches_token=${flag(diag.accountMatchesToken)} device=${flag(diag.deviceHeaderPresent)} oai_did=${flag(diag.cookieDidPresent)} sentinel_flow=${diag.sentinelFlow} sentinel_device_match=${flag(diag.sentinelDeviceMatches)}`);
                 }
             } else {

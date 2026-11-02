@@ -287,7 +287,8 @@ curl -sS -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:28080/
 ```env
 CHECKOUT_MODE=auto
 CHECKOUT_UI_HEADFUL=1
-CHECKOUT_SENTINEL_TIMEOUT_MS=15000
+CHECKOUT_SENTINEL_INIT_TIMEOUT_MS=30000
+CHECKOUT_SENTINEL_TIMEOUT_MS=30000
 CHECKOUT_API_TIMEOUT_MS=30000
 ```
 
@@ -301,6 +302,11 @@ UI 发出创建请求前会核对实际 `plan_name`、country 和 currency。
 若页面当前选择了另一个 Pro 档位或忽略自定义套餐，会明确返回不匹配错误，不会静默创建不同套餐的链接。
 
 SDK token 由当前页面实时获取，不从配置中硬编码或缓存。
+SDK 加载/初始化与 token 生成分别使用上面两个超时预算（默认各 30 秒）；环境中已有的显式值仍优先，不会被部署脚本覆盖。
+加载器可能异步替换 SDK 对象或函数，程序会在同一个阶段预算内跟踪交接，不会被旧 stub 的 pending Promise 卡住，也不会重复初始化同一个 SDK/init 实现。
+超时只停止本程序后续调用，不能取消第三方 SDK 内部已启动的工作；本程序不会在超时后继续取 token 或提交 API。
+失败日志包含 `stage=load/ready/init/token` 和 `elapsed_ms`；成功日志包含 `Sentinel 就绪 init_ms=... token_ms=... handoffs=...`，不输出 token 或 SDK 异常原文。
+若持续停在 `load/ready`，优先检查当前代理出口能否加载站点 SDK 资源；`init/token` 超时需要结合相同出口的浏览器网络日志判断，单纯增加预算不保证解决。
 `unusual activity` 可能同时涉及 Session、账号或网络状态；补充 SDK 请求上下文不保证上游一定接受。
 查看任务日志，分别确认 `[Checkout] 使用当前页面 Sentinel SDK`、`正在回退到 UI`、`CHECKOUT_DEBUG_SUCCESS`；只有最后一个标记才表示本次调试返回了链接。
 
