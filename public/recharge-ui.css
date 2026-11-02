@@ -167,7 +167,9 @@ body.recharge-landing {
 .landing-header { position: fixed; inset: 0 0 auto; z-index: 40; height: 72px; background: #ffffff80; border-bottom: 1px solid transparent; transition: background .3s, box-shadow .3s, backdrop-filter .3s, border-color .3s; }
 .landing-header.is-scrolled { background: #ffffffd9; backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border-color: #e8e7ecb3; box-shadow: 0 2px 10px #00000003; }
 .landing-header-inner { display: flex; align-items: center; gap: 40px; width: min(1160px, calc(100% - 64px)); height: 100%; margin: auto; }
-.recharge-landing .landing-brand { display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0; color: #111114; font-size: 18px; font-weight: 750; letter-spacing: -.7px; text-decoration: none; }
+.recharge-landing .landing-brand,
+.invoice-page .landing-brand { display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0; color: #111114; font-size: 18px; font-weight: 750; letter-spacing: -.7px; text-decoration: none; }
+.invoice-page .landing-brand:hover { color: #111114; text-decoration: none; }
 .landing-brand img { display: block; object-fit: contain; }
 .brand-divider { margin: 0 7px; color: #b7b1c2; font-weight: 400; }
 .landing-desktop-nav { display: flex; align-items: center; gap: 28px; margin-left: auto; }
@@ -175,8 +177,24 @@ body.recharge-landing {
 .landing-desktop-nav a::after { content: ''; position: absolute; left: 0; bottom: 2px; width: 100%; height: 1px; background: currentColor; transform: scaleX(0); transform-origin: left; transition: transform .2s; }
 .landing-desktop-nav a:hover { color: var(--text-main); }
 .landing-desktop-nav a:hover::after { transform: scaleX(1); }
-.invoice-heartbeat { animation: invoice-heartbeat 1.6s ease-in-out infinite; }
-.landing-desktop-nav .invoice-heartbeat { color: #5b21b6; font-weight: 650; }
+.landing-desktop-nav .invoice-nav-link {
+    display: inline-grid; position: relative; isolation: isolate; justify-items: center; gap: 2px;
+    min-width: 78px; padding: 5px 8px 4px; line-height: 1; text-align: center;
+}
+.landing-desktop-nav .invoice-nav-link::before {
+    content: ''; position: absolute; top: -3px; left: 50%; z-index: 0; width: 38px; height: 38px;
+    border: 1px solid #8b5cf64d; border-radius: 50%; background: #8b5cf61f; transform: translateX(-50%) scale(.68);
+    animation: invoice-nav-pulse 1.35s ease-out infinite; pointer-events: none;
+}
+.landing-desktop-nav .invoice-nav-link::after { display: none; }
+.invoice-heartbeat { animation: invoice-heartbeat 1.35s cubic-bezier(.22, .8, .35, 1) infinite; }
+.landing-desktop-nav .invoice-heartbeat { display: inline-block; position: relative; z-index: 1; color: #5b21b6; font-weight: 750; transform-origin: center; }
+.landing-desktop-nav .invoice-nav-link-typing {
+    display: block; position: relative; z-index: 1; width: 7.5em; overflow: hidden; color: #91919a;
+    border-right: 1px solid #aaa9b0; font-size: 10px; font-weight: 500; line-height: 1.15;
+    letter-spacing: .04em; text-align: left; white-space: nowrap;
+    animation: invoice-typewriter 3.8s steps(7, end) infinite, invoice-caret .7s step-end infinite;
+}
 .landing-dialog-links .invoice-heartbeat { color: #5b21b6; font-weight: 650; background: #f7f3ff; }
 .recharge-landing .feature-badge.invoice-heartbeat { position: relative; padding: 5px 9px; border: 1px solid #ddd4f4; border-radius: 999px; background: #faf7ff; }
 .recharge-landing .feature-badge.invoice-heartbeat::before {
@@ -214,14 +232,28 @@ html.recharge-document:has(.landing-nav-dialog[open]) { overflow: hidden; }
 @keyframes landing-backdrop-out { to { opacity: 0; } }
 @keyframes invoice-heartbeat {
     0%, 100% { transform: scale(1); }
-    18% { transform: scale(1.045); }
-    32% { transform: scale(1); }
-    46% { transform: scale(1.03); }
-    60% { transform: scale(1); }
+    10% { transform: scale(1.34); }
+    22% { transform: scale(1.06); }
+    36% { transform: scale(1.28); }
+    52% { transform: scale(1); }
 }
 @keyframes invoice-pulse {
     0% { opacity: .75; transform: scale(.92); }
     70%, 100% { opacity: 0; transform: scale(1.18); }
+}
+@keyframes invoice-nav-pulse {
+    0%, 52%, 100% { opacity: 0; transform: translateX(-50%) scale(.68); }
+    10% { opacity: .85; transform: translateX(-50%) scale(1.08); }
+    38% { opacity: .08; transform: translateX(-50%) scale(1.65); }
+}
+@keyframes invoice-typewriter {
+    0%, 12% { width: 0; }
+    42%, 68% { width: 7.5em; }
+    88%, 100% { width: 0; }
+}
+@keyframes invoice-caret {
+    0%, 100% { border-right-color: #aaa9b0; }
+    50% { border-right-color: transparent; }
 }
 @supports (interpolate-size: allow-keywords) {
     .recharge-landing .plan-disclosure { interpolate-size: allow-keywords; }
@@ -261,7 +293,7 @@ html.recharge-document:has(.landing-nav-dialog[open]) { overflow: hidden; }
     .recharge-landing .faq-panel { padding: 15px 17px; }
     .landing-header { height: 64px; }
     .landing-header-inner { width: calc(100% - 32px); }
-    .recharge-landing .landing-brand { font-size: 16px; }
+    .recharge-landing .landing-brand, .invoice-page .landing-brand { font-size: 16px; }
     .landing-brand img { width: 25px; height: 25px; }
     .landing-desktop-nav, .recharge-landing .landing-nav-cta { display: none; }
     .recharge-landing .landing-menu-toggle { display: inline-grid; }
@@ -270,7 +302,8 @@ html.recharge-document:has(.landing-nav-dialog[open]) { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
     html.recharge-document { scroll-behavior: auto; }
     .recharge-landing *, .recharge-landing *::before, .recharge-landing *::after, .landing-nav-dialog::backdrop { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
-    .invoice-heartbeat { animation: none !important; }
+    .invoice-heartbeat, .invoice-nav-link-typing, .landing-desktop-nav .invoice-nav-link::before { animation: none !important; }
+    .landing-desktop-nav .invoice-nav-link-typing { width: 7.5em; border-right-color: transparent; }
     .recharge-landing .shine-text { background: none; color: #111114; -webkit-text-fill-color: currentColor; }
     [data-reveal].reveal-pending { opacity: 1; transform: none; }
 }

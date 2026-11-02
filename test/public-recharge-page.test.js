@@ -138,12 +138,36 @@ describe.skipIf(!browserAvailable)('public recharge page in Chromium (mocked bac
         const { context, page, errors } = await openPage();
         try {
             const entry = page.getByRole('link', { name: '打开发票助手，查询订阅与发票' }).first();
-            expect(await entry.evaluate(element => getComputedStyle(element).animationName)).toContain('invoice-heartbeat');
+            expect(await entry.locator('.invoice-heartbeat').evaluate(element => getComputedStyle(element).animationName)).toContain('invoice-heartbeat');
+            expect(await entry.locator('.invoice-nav-link-typing').textContent()).toBe('可开发票～～～');
             await entry.click();
             await page.waitForURL('**/subscription');
             expect(await page.getByRole('heading', { name: '发票助手', exact: true }).isVisible()).toBe(true);
             expect(await page.locator('body').getAttribute('class')).toContain('invoice-page');
-            expect(await page.locator('.landing-brand').isVisible()).toBe(true);
+            const brand = page.locator('.invoice-page .landing-brand');
+            expect(await brand.isVisible()).toBe(true);
+            expect(await brand.evaluate((element) => {
+                const style = getComputedStyle(element);
+                const image = element.querySelector('img');
+                const label = element.querySelector('span');
+                const imageBox = image.getBoundingClientRect();
+                const labelBox = label.getBoundingClientRect();
+                return {
+                    display: style.display,
+                    color: style.color,
+                    textDecorationLine: style.textDecorationLine,
+                    verticalCenterDifference: Math.abs(
+                        imageBox.top + imageBox.height / 2 - (labelBox.top + labelBox.height / 2)
+                    )
+                };
+            })).toEqual({
+                // A direct child of the flex header is blockified by layout; it still uses the flex row model.
+                display: 'flex',
+                color: 'rgb(17, 17, 20)',
+                textDecorationLine: 'none',
+                verticalCenterDifference: 0
+            });
+            expect(await page.locator('.invoice-page .invoice-nav-link-typing').textContent()).toBe('可开发票～～～');
             expect(await page.locator('#checkBtn').isVisible()).toBe(true);
             expect(errors).toEqual([]);
         } finally {
