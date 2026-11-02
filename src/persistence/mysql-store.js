@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { projectPath } = require('../project-paths');
 const { PLAN_NAME_MAP, normalizePlanType, resolvePlanName } = require('../config/plans');
+const { isSupportedRegion, getRegionConfig } = require('../config/region-config');
 const crypto = require('crypto');
 const mysql = require('mysql2/promise');
 const {
@@ -401,6 +402,7 @@ async function ensureLegacyColumns() {
     await ensureColumn('proxy_assets', 'proxy_url', 'TEXT NOT NULL');
     await ensureColumn('proxy_assets', 'proxy_url_hash', "CHAR(64) NOT NULL DEFAULT ''");
     await ensureColumn('proxy_assets', 'label', "VARCHAR(128) NOT NULL DEFAULT ''");
+    await ensureColumn('proxy_assets', 'region_code', "VARCHAR(2) NOT NULL DEFAULT ''");
     await ensureColumn('proxy_assets', 'protocol', "VARCHAR(16) NOT NULL DEFAULT ''");
     await ensureColumn('proxy_assets', 'host', "VARCHAR(255) NOT NULL DEFAULT ''");
     await ensureColumn('proxy_assets', 'is_active', 'TINYINT(1) NOT NULL DEFAULT 1');
@@ -1736,6 +1738,7 @@ function formatProxyAssetRow(row) {
         proxy_url: String(row.proxy_url || ''),
         proxy_url_masked: maskProxyUrl(row.proxy_url),
         label: String(row.label || ''),
+        region_code: String(row.region_code || ''),
         protocol: String(row.protocol || ''),
         host: String(row.host || ''),
         is_active: Number(row.is_active) === 1,
@@ -1764,7 +1767,17 @@ async function listProxyAssets() {
     return rows.map(formatProxyAssetRow);
 }
 
-async function addProxyAssets(input) {
+function normalizeProxyRegionCode(regionCode) {
+    if (typeof regionCode !== 'string') return null;
+    const code = regionCode.trim().toUpperCase();
+    return code === '' || isSupportedRegion(code) ? code : null;
+}
+
+async function addProxyAssets(input, regionCode = '') {
+    const code = normalizeProxyRegionCode(regionCode);
+    if (code === null) {
+        return { success: false, error: '不支持的代理国家标签' };
+    }
     const lines = normalizeProxyLines(input);
     if (!lines.length) {
         return { success: false, error: '未提供代理 URL' };
@@ -1786,9 +1799,9 @@ async function addProxyAssets(input) {
         }
         const meta = parseProxyMeta(line);
         const result = await runExecute(
-            `INSERT INTO proxy_assets (proxy_url, proxy_url_hash, protocol, host, is_active, sort_order)
-             VALUES (?, ?, ?, ?, 1, ?)`,
-            [line, urlHash, meta.protocol || '', meta.host || '', Date.now() % 1000000]
+            `INSERT INTO proxy_assets (proxy_url, proxy_url_hash, protocol, host, region_code, is_active, sort_order)
+             VALUES (?, ?, ?, ?, ?, 1, ?)`,
+            [line, urlHash, meta.protocol || '', meta.host || '', code, Date.now() % 1000000]
         );
         added += 1;
         ids.push(Number(result.insertId));
@@ -1823,6 +1836,25 @@ async function setProxyAssetActive(id, isActive) {
         return { success: false, error: '代理不存在' };
     }
     return { success: true, is_active: Boolean(isActive) };
+}
+
+async function setProxyAssetRegion(id, regionCode) {
+    const code = normalizeProxyRegionCode(regionCode);
+    if (code === null) {
+        return { success: false, error: '不支持的代理国家标签' };
+    }
+    const proxyId = Number(id);
+    if (!Number.isSafeInteger(proxyId) || proxyId <= 0) {
+        return { success: false, error: '代理不存在' };
+    }
+    const result = await runExecute(
+        `UPDATE proxy_assets SET region_code = ? WHERE id = ?`,
+        [code, proxyId]
+    );
+    if (!result.affectedRows) {
+        return { success: false, error: '代理不存在' };
+    }
+    return { success: true, region_code: code };
 }
 
 async function updateProxyAssetCheck(id, checkResult) {
@@ -1886,15 +1918,23 @@ async function migrateLegacyProxyConfig() {
 
 // 只取代理，不占用手机/卡资产；适合注册/协议提取这种只用代理的子流程
 // 支持 {session} 占位符；每次调用替换为新的随机 sticky session ID
-async function getActiveProxy() {
+async function getActiveProxy(regionCode = '') {
+    const code = normalizeProxyRegionCode(regionCode);
+    if (code === null) {
+        throw new Error('不支持的代理国家标签');
+    }
     const rows = await runQuery(
         `SELECT proxy_url
          FROM proxy_assets
-         WHERE is_active = 1
+         WHERE is_active = 1${code ? ' AND region_code = ?' : ''}
          ORDER BY RAND()
-         LIMIT 1`
+         LIMIT 1`,
+        code ? [code] : []
     );
-    if (!rows.length) {
+    if (!rows.length || !String(rows[0].proxy_url || '').trim()) {
+        if (code) {
+            throw new Error(`没有已启用且标记为${getRegionConfig(code).label}（${code}）的代理，请在代理池中手动设置国家标签并启用`);
+        }
         return '';
     }
     await runExecute(
@@ -3555,6 +3595,7 @@ module.exports = {
     addProxyAssets,
     deleteProxyAsset,
     setProxyAssetActive,
+    setProxyAssetRegion,
     updateProxyAssetCheck,
     getProxyAssetById,
     incrementAssetSuccessCount,

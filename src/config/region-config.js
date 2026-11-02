@@ -18,7 +18,24 @@ const SUPPORTED_REGIONS = Object.keys(REGION_CONFIG);
 /** 默认支付地区 */
 const DEFAULT_REGION = 'PH';
 
-const { PLAN_TYPE_LABELS, getPlanTypeLabel } = require('./plans');
+const { PLAN_TYPE_LABELS, getPlanTypeLabel, normalizePlanType } = require('./plans');
+
+/** 套餐默认结账地区；与后台全局地区设置分开。 */
+const PLAN_PAYMENT_REGIONS = Object.freeze({
+    go: 'EG',
+    plus: 'PH',
+    pro_10x: 'PH',
+    pro_20x: 'PH',
+    pro_50x: 'PH'
+});
+
+function getPlanPaymentRegion(planType, override = '') {
+    const type = normalizePlanType(planType);
+    if (!type) throw new Error(`不支持的套餐类型: ${String(planType)}`);
+    const region = String(override || '').trim().toUpperCase();
+    if (region && !isSupportedRegion(region)) throw new Error(`不支持的地区: ${region}`);
+    return region || PLAN_PAYMENT_REGIONS[type];
+}
 
 /**
  * 检查地区代码是否在支持列表中
@@ -64,6 +81,8 @@ module.exports = {
     REGION_CONFIG,
     SUPPORTED_REGIONS,
     DEFAULT_REGION,
+    PLAN_PAYMENT_REGIONS,
+    getPlanPaymentRegion,
     PLAN_TYPE_LABELS,
     isSupportedRegion,
     getRegionConfig,

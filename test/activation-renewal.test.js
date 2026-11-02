@@ -3,10 +3,12 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { getPlanPaymentRegion, REGION_CONFIG } = require('../src/config/region-config');
+const { normalizePlanType } = require('../src/config/plans');
 
 const source = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
 
-function fixture({ paymentStatus = 'success', renewalState = 'disabled' } = {}) {
+function fixture({ paymentStatus = 'success', renewalState = 'disabled', env = {} } = {}) {
     const store = {
         getGptApiConfig: vi.fn(async () => ({ enabled: true, api_key: 'synthetic', country: 'PH', currency: 'PHP' })),
         getActiveProxy: vi.fn(async () => 'http://task-proxy.invalid:8080'),
@@ -36,7 +38,8 @@ function fixture({ paymentStatus = 'success', renewalState = 'disabled' } = {}) 
     const broadcastToTask = vi.fn();
     const notifyTaskOutcome = vi.fn();
     const context = vm.createContext({
-        __dirname: path.join(__dirname, '..'), path, store, gptApi, process: { env: {} },
+        __dirname: path.join(__dirname, '..'), path, store, gptApi, process: { env },
+        getPlanPaymentRegion, REGION_CONFIG, normalizePlanType,
         console: { log() {}, error() {}, warn() {} }, MAX_PROCESS_ATTEMPTS: 3,
         cancelRenewalAfterActivation, runCheckoutScript, broadcastToTask, notifyTaskOutcome,
         logTask: vi.fn(), releaseForegroundSlot: vi.fn(), getTotalActiveJobs: () => 0,
@@ -50,9 +53,9 @@ function fixture({ paymentStatus = 'success', renewalState = 'disabled' } = {}) 
     });
     vm.runInContext(source.slice(source.indexOf('function parseCardExpiry('), source.indexOf('\nasync function handleActivationRequest(')), context);
     return { store, gptApi, runCheckoutScript, cancelRenewalAfterActivation, broadcastToTask, notifyTaskOutcome,
-        run: (mode, cancelAutoRenewOnSuccess) => context[mode === 'local' ? 'spawnActivationWorker' : 'runGptApiWorker']({
+        run: (mode, cancelAutoRenewOnSuccess, planType = 'plus') => context[mode === 'local' ? 'spawnActivationWorker' : 'runGptApiWorker']({
             task: { jobKey: 'test-job' }, token: 'synthetic', sessionRaw: '{}', session: {},
-            cdk: 'TEST-CDK', cdkDetails: { plan_type: 'plus' }, planType: 'plus', cancelAutoRenewOnSuccess
+            cdk: 'TEST-CDK', cdkDetails: { plan_type: planType }, planType, cancelAutoRenewOnSuccess
         })
     };
 }
@@ -159,6 +162,42 @@ describe.each(['local', 'provider'])('%s activation auto-renewal', (mode) => {
         expect(run.broadcastToTask.mock.lastCall[1]).toMatchObject({ status: 'success', progress: 100 });
         expect(run.store.updateTaskLog.mock.lastCall[1].message).toContain('请勿重复充值');
         expect(run.store.markCdkUnused).not.toHaveBeenCalled();
+    });
+});
+
+describe('local activation regional proxy routing', () => {
+    it.each([['go', 'EG'], ['plus', 'PH'], ['pro_10x', 'PH'], ['pro_20x', 'PH'], ['pro_50x', 'PH']])('binds %s to %s and overwrites stale inherited region/proxy', async (planType, region) => {
+        const run = fixture({ env: { PAYMENT_REGION_OVERRIDE: 'US', PROXY: 'http://stale-proxy.invalid:8080' } });
+        await run.run('local', false, planType);
+        expect(run.store.getActiveProxy).toHaveBeenCalledExactlyOnceWith(region);
+        expect(run.runCheckoutScript.mock.calls[0][2]).toMatchObject({
+            CDK_PLAN_TYPE: planType, PAYMENT_REGION_OVERRIDE: region, PROXY: 'http://task-proxy.invalid:8080'
+        });
+    });
+
+    it.each(['empty', 'missing'])('fails before spawning a child when matching proxy is %s', async mode => {
+        const run = fixture();
+        if (mode === 'empty') run.store.getActiveProxy.mockResolvedValue('');
+        else run.store.getActiveProxy.mockRejectedValue(new Error('没有启用的埃及标签代理'));
+        await run.run('local', false, 'go');
+        expect(run.runCheckoutScript).not.toHaveBeenCalled();
+        expect(run.store.reserveCard).not.toHaveBeenCalled();
+        expect(run.store.markCdkUnused).toHaveBeenCalledWith('TEST-CDK');
+        expect(run.broadcastToTask.mock.lastCall[1].status).toBe('failed');
+    });
+
+    it('reuses one proxy for local retries and post-payment renewal', async () => {
+        const run = fixture();
+        run.runCheckoutScript.mockResolvedValueOnce({ output: 'retry', analysis: {
+            status: 'retry', message: 'retry', shouldRetry: true
+        } });
+        await run.run('local', true, 'go');
+        expect(run.runCheckoutScript).toHaveBeenCalledTimes(2);
+        expect(run.store.getActiveProxy).toHaveBeenCalledExactlyOnceWith('EG');
+        expect(run.runCheckoutScript.mock.calls.map(call => call[2].PROXY)).toEqual([
+            'http://task-proxy.invalid:8080', 'http://task-proxy.invalid:8080'
+        ]);
+        expect(run.cancelRenewalAfterActivation.mock.calls[0][1].proxy).toBe('http://task-proxy.invalid:8080');
     });
 });
 

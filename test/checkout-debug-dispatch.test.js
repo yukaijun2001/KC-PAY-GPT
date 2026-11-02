@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { getPlanPaymentRegion } = require('../src/config/region-config');
 
 function checkoutDispatch(env) {
     const source = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
@@ -15,7 +16,8 @@ function checkoutDispatch(env) {
         browserPool: { getRuntimeEnabled: () => true, withBrowserSlot },
         buildWorkerRuntimeEnv: (base, _, mode) => ({ ...base, BROWSER_RUNTIME_MODE: mode }),
         buildHcaptchaEnvFromConfig: () => ({ env: {} }),
-        store: { getActiveProxy: async () => '', getHcaptchaConfig: async () => ({}), updateTaskLog: vi.fn() },
+        store: { getActiveProxy: vi.fn(async region => `http://${region.toLowerCase()}-proxy.invalid:8080`), getHcaptchaConfig: async () => ({}), updateTaskLog: vi.fn() },
+        getPlanPaymentRegion,
         logTask: vi.fn(), runCheckoutScript,
         analyzeCheckoutDebugOutput: () => ({ status: 'success', checkoutUrl: 'https://chatgpt.com/checkout/test' }),
         extractScreenshotsFromOutput: () => []
@@ -47,5 +49,31 @@ describe('admin Checkout debug dispatch', () => {
         await dispatch.spawnCheckoutDebugWorker(args);
         expect(dispatch.withBrowserSlot).not.toHaveBeenCalled();
         expect(dispatch.runCheckoutScript.mock.calls[0][2].BROWSER_RUNTIME_MODE).toBe('standalone');
+    });
+
+    it.each([['go', 'EG'], ['plus', 'PH'], ['pro_10x', 'PH'], ['pro_20x', 'PH'], ['pro_50x', 'PH']])('uses the %s default region and matching proxy', async (planType, region) => {
+        const dispatch = checkoutDispatch({});
+        await dispatch.spawnCheckoutDebugWorker({ ...args, planType, region: undefined });
+        expect(dispatch.store.getActiveProxy).toHaveBeenCalledExactlyOnceWith(region);
+        expect(dispatch.runCheckoutScript.mock.calls[0][2]).toMatchObject({
+            PAYMENT_REGION_OVERRIDE: region, PROXY: `http://${region.toLowerCase()}-proxy.invalid:8080`
+        });
+    });
+
+    it('preserves an explicit manual debug country and selects that country proxy', async () => {
+        const dispatch = checkoutDispatch({});
+        await dispatch.spawnCheckoutDebugWorker({ ...args, planType: 'go', region: 'SG' });
+        expect(dispatch.store.getActiveProxy).toHaveBeenCalledExactlyOnceWith('SG');
+        expect(dispatch.runCheckoutScript.mock.calls[0][2].PAYMENT_REGION_OVERRIDE).toBe('SG');
+    });
+
+    it.each(['empty', 'missing'])('stops before browser allocation when matching proxy is %s', async mode => {
+        const dispatch = checkoutDispatch({});
+        if (mode === 'empty') dispatch.store.getActiveProxy.mockResolvedValue('');
+        else dispatch.store.getActiveProxy.mockRejectedValue(new Error('缺少埃及标签代理'));
+        await dispatch.spawnCheckoutDebugWorker({ ...args, planType: 'go', region: undefined });
+        expect(dispatch.withBrowserSlot).not.toHaveBeenCalled();
+        expect(dispatch.runCheckoutScript).not.toHaveBeenCalled();
+        expect(dispatch.store.updateTaskLog.mock.lastCall[1]).toMatchObject({ status: 'failed' });
     });
 });

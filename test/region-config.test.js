@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const {
     REGION_CONFIG, SUPPORTED_REGIONS, DEFAULT_REGION, isSupportedRegion,
-    getRegionConfig, getRegionBilling, getRegionBrowserProfile
+    getRegionConfig, getRegionBilling, getRegionBrowserProfile, getPlanPaymentRegion
 } = require('../src/config/region-config');
 const { validateUiCheckoutPayload } = require('../src/checkout/pricing-checkout');
 
@@ -39,5 +39,17 @@ describe('Egypt payment region', () => {
             if (country === 'EG' && currency === 'EGP') expect(result).toBe('');
             else expect(result).toContain('EG/EGP');
         }
+    });
+});
+
+describe('subscription default payment regions', () => {
+    it.each([['go', 'EG'], ['plus', 'PH'], ['pro_10x', 'PH'], ['pro_20x', 'PH'], ['pro_50x', 'PH']])('%s uses %s independently of global settings', (planType, country) => {
+        expect(getPlanPaymentRegion(planType)).toBe(country);
+    });
+
+    it('preserves a valid explicit debug region and rejects unsupported inputs', () => {
+        expect(getPlanPaymentRegion('go', ' sg ')).toBe('SG');
+        expect(() => getPlanPaymentRegion('pro_5x')).toThrow('不支持的套餐');
+        expect(() => getPlanPaymentRegion('go', 'ZZ')).toThrow('不支持的地区');
     });
 });

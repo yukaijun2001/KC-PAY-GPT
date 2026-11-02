@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS proxy_assets (
     proxy_url TEXT NOT NULL COMMENT '完整代理 URL，支持 {session}',
     proxy_url_hash CHAR(64) NOT NULL COMMENT 'URL SHA256，用于去重',
     label VARCHAR(128) NOT NULL DEFAULT '' COMMENT '可选备注',
+    region_code VARCHAR(2) NOT NULL DEFAULT '' COMMENT '管理员手动标记的国家 PH/US/SG/MY/EG，空为未标记',
     protocol VARCHAR(16) NOT NULL DEFAULT '' COMMENT 'http/socks5 等',
     host VARCHAR(255) NOT NULL DEFAULT '' COMMENT '代理主机',
     is_active TINYINT(1) NOT NULL DEFAULT 1 COMMENT '1=启用参与任务抽取',

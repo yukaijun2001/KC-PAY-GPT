@@ -2,7 +2,7 @@ const { executePaymentWithRetry } = require('./src/payments/payment-retry');
 const { openPricingCheckout } = require('./src/checkout/pricing-checkout');
 const { openApiCheckout } = require('./src/checkout/chatgpt');
 const store = require('./src/persistence/mysql-store');
-const { getRegionConfig, getRegionBrowserProfile } = require('./src/config/region-config');
+const { getRegionConfig, getRegionBrowserProfile, getPlanPaymentRegion } = require('./src/config/region-config');
 const { normalizePlanType } = require('./src/config/plans');
 const { installChatGptSession, bootstrapChatGptSession } = require('./src/browser/session-auth');
 const { connectTaskBrowser, applyCdpEnv, closeTaskBrowser } = require('./src/browser/browser-runtime');
@@ -190,7 +190,22 @@ async function run() {
     let paymentSucceeded = false;
 
     try {
-        const preparedProxy = await preparePlaywrightProxy(CONFIG.proxy);
+        // 先确定套餐和地区，再创建浏览器：profile、代理与 Checkout 不可各自取默认值。
+        let requestedPlan = CONFIG.planType;
+        const cdkCode = CONFIG.cdkCode;
+        const email = CONFIG.email;
+        if (cdkCode) {
+            const cdkDetails = await store.verifyCdkDetails(cdkCode);
+            if (!cdkDetails) throw new Error('CDK 不存在，无法确定订阅套餐');
+            requestedPlan = cdkDetails.plan_type;
+        }
+        const planType = normalizePlanType(requestedPlan);
+        if (!planType) throw new Error(`不支持的套餐类型: ${String(requestedPlan)}`);
+        const paymentRegion = getPlanPaymentRegion(planType, CONFIG.paymentRegionOverride);
+        const regionCfg = getRegionConfig(paymentRegion);
+        const taskProxy = CONFIG.proxy || await store.getActiveProxy(paymentRegion);
+        if (!taskProxy) throw new Error(`没有启用的 ${paymentRegion} 国家标签代理，请先在代理池设置标签并启用`);
+        const preparedProxy = await preparePlaywrightProxy(taskProxy);
         proxyCleanup = preparedProxy.cleanup;
         const proxyConfig = preparedProxy.proxyConfig;
 
@@ -212,9 +227,6 @@ async function run() {
         const matched = realUserAgent.match(/Chrome\/(\d+)/);
         const chromeMajor = matched ? Number(matched[1]) : 147;
 
-        const paymentRegion = String(CONFIG.paymentRegionOverride || '').trim().toUpperCase()
-            || await store.getPaymentRegion();
-        const regionCfg = getRegionConfig(paymentRegion);
         const browserProfile = getRegionBrowserProfile(paymentRegion);
 
         const contextOptions = {
@@ -488,28 +500,6 @@ async function run() {
             console.log('[1] 准备自助充值流程...');
         }
 
-        // Determine plan_type: prefer env variable, fallback to CDK lookup
-        let planType = CONFIG.planType;
-        const cdkCode = CONFIG.cdkCode;
-        const email = CONFIG.email;
-
-        if (cdkCode) {
-            try {
-                const cdkDetails = await store.verifyCdkDetails(cdkCode);
-                if (cdkDetails && cdkDetails.plan_type) {
-                    planType = cdkDetails.plan_type;
-                }
-            } catch (_) {
-                // CDK lookup failed, use default
-            }
-        }
-        if (!planType) {
-            planType = 'plus';
-        }
-        const normalizedPlanType = normalizePlanType(planType);
-        if (!normalizedPlanType) throw new Error(`不支持的套餐类型: ${String(planType)}`);
-        planType = normalizedPlanType;
-
         // Resolve region and currency (与浏览器 profile 一致)
         const billingCountry = paymentRegion;
         const billingCurrency = regionCfg ? regionCfg.currency : 'USD';
@@ -614,6 +604,7 @@ async function run() {
             planType,
             cdkCode,
             email,
+            region: paymentRegion,
             stripeSessionId
         });
 

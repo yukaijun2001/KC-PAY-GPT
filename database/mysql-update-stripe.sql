@@ -57,3 +57,17 @@ VALUES
     ('external_card_api_key', UUID()),
     ('last_used_address_id', '')
 ON DUPLICATE KEY UPDATE config_value = app_config.config_value;
+
+-- 6. 已有代理池新增管理员国家标签（兼容 MySQL 8；不推断或改写旧代理的国家）
+-- 新部署由 mysql-schema.sql 建表；已有部署也会由应用 ensureColumn 自动补齐。
+SET @proxy_region_migration = IF(
+    EXISTS(SELECT 1 FROM information_schema.tables
+           WHERE table_schema = DATABASE() AND table_name = 'proxy_assets')
+    AND NOT EXISTS(SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = DATABASE() AND table_name = 'proxy_assets' AND column_name = 'region_code'),
+    'ALTER TABLE proxy_assets ADD COLUMN region_code VARCHAR(2) NOT NULL DEFAULT '''' COMMENT ''管理员手动标记的国家 PH/US/SG/MY/EG，空为未标记'' AFTER label',
+    'SELECT 1'
+);
+PREPARE proxy_region_statement FROM @proxy_region_migration;
+EXECUTE proxy_region_statement;
+DEALLOCATE PREPARE proxy_region_statement;

@@ -1697,6 +1697,7 @@
             flex-wrap: wrap;
         }
     </style>
+    <link rel="stylesheet" href="/admin-ui.css">
 </head>
 
 <body>
@@ -1745,7 +1746,8 @@
         </div>
     </div>
 
-    <aside class="sidebar">
+    <button type="button" id="sidebar_scrim" class="sidebar-scrim" aria-label="关闭导航菜单" tabindex="-1"></button>
+    <aside class="sidebar" id="admin_sidebar" aria-label="后台导航">
         <div class="sidebar-brand">
             <div class="brand-logo"><i data-lucide="zap" color="white" fill="white"></i></div>
             <span class="brand-name">KC GPT自动充值系统</span>
@@ -1833,6 +1835,11 @@
     </aside>
 
     <main class="main-content">
+        <header class="workspace-bar">
+            <button type="button" id="workspace_menu_toggle" class="mobile-menu-button" aria-label="打开导航菜单" aria-controls="admin_sidebar" aria-expanded="false"><i data-lucide="menu"></i></button>
+            <div class="workspace-breadcrumb"><span>管理工作台</span><span class="workspace-slash">/</span><strong id="workspace_page_name">概览中心</strong></div>
+            <div class="workspace-account"><span class="workspace-avatar">KC</span><div>管理员<small>ADMIN WORKSPACE</small></div></div>
+        </header>
         <!-- 概览 -->
         <div id="dashboard" class="page-view active">
             <div class="page-header">
@@ -2008,7 +2015,7 @@
                     <p id="gpt_api_key_hint" style="font-size: 12px; color: var(--text-dim); margin-top: 6px;"></p>
                 </div>
                 <p style="font-size: 12px; color: var(--text-dim); margin-top: 12px;">
-                    套餐（plan_key）将自动同步 CDK 的套餐类型；国家/币种使用协议默认值（PH / PHP），无需填写。
+                    套餐（plan_key）将自动同步 CDK 的套餐类型；Go 使用埃及（EG / EGP），其他套餐使用菲律宾（PH / PHP），无需填写。
                 </p>
                 <div id="gpt_api_status" style="margin-top: 18px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-secondary);">
                     <div style="display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap;">
@@ -2239,6 +2246,49 @@
                 </div>
             </div>
 
+            <div class="panel" id="captcharun_account_panel" style="margin-top: 24px;">
+                <h2 class="panel-title">CaptchaRun 账户</h2>
+                <p style="font-size: 13px; color: var(--text-dim); margin-top: 8px; line-height: 1.7;">
+                    独立配置 CaptchaRun Token，用于测试账户连接和查询余额；当前不接入支付验证码自动求解。
+                    请勿将此 Token 填入上方其他打码平台的 API Key。
+                </p>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 20px;">
+                    <div class="form-group">
+                        <label for="captcharun_api_token">API Token</label>
+                        <input type="password" id="captcharun_api_token" class="asset-input" placeholder="输入 CaptchaRun Token" autocomplete="off" spellcheck="false" oninput="invalidateCaptcharunWallet()" disabled>
+                        <p id="captcharun_token_hint" style="font-size: 12px; color: var(--text-dim); margin-top: 6px;">正在加载账户配置…</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="captcharun_timeout">连接超时（秒）</label>
+                        <input type="number" id="captcharun_timeout" class="asset-input" min="5" max="120" step="1" value="20" oninput="invalidateCaptcharunWallet()" disabled>
+                    </div>
+                </div>
+                <p id="captcharun_status" role="status" aria-live="polite" style="font-size: 13px; color: var(--text-dim); margin-top: 14px;"></p>
+                <div id="captcharun_wallet" hidden style="margin-top: 14px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-secondary);">
+                    <div style="display: flex; gap: 22px; flex-wrap: wrap; line-height: 1.8;">
+                        <span>余额：<strong id="captcharun_balance">—</strong></span>
+                        <span>信用额度：<strong id="captcharun_credit">—</strong></span>
+                        <span>累计充值：<strong id="captcharun_recharge">—</strong></span>
+                        <span>分成：<strong id="captcharun_share">—</strong></span>
+                    </div>
+                    <p style="font-size: 12px; color: var(--text-dim); margin-top: 6px;">数据由 CaptchaRun 返回，金额单位以平台账户为准。</p>
+                </div>
+                <div style="margin-top: 20px; display: flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap;">
+                    <button type="button" id="captcharun_reload_btn" class="btn btn-secondary" onclick="loadCaptcharunAccount(true)">
+                        <i data-lucide="refresh-cw"></i> 重新加载
+                    </button>
+                    <button type="button" id="captcharun_clear_btn" class="btn btn-secondary" onclick="clearCaptcharunToken()" disabled>
+                        <i data-lucide="trash-2"></i> 清除 Token
+                    </button>
+                    <button type="button" id="captcharun_test_btn" class="btn btn-secondary" onclick="testCaptcharunAccount()" disabled>
+                        <i data-lucide="activity"></i> 测试连接与余额
+                    </button>
+                    <button type="button" id="captcharun_save_btn" class="btn btn-primary" onclick="saveCaptcharunAccount()" disabled>
+                        <i data-lucide="save"></i> 保存账户配置
+                    </button>
+                </div>
+            </div>
+
             <div class="panel" style="margin-top: 24px;">
                 <h2 class="panel-title">修改后台密码</h2>
                 <div class="form-group" style="margin-top: 24px;">
@@ -2316,7 +2366,7 @@
             <div class="panel" style="margin-top: 24px;">
                 <h2 class="panel-title">支付地区设置</h2>
                 <p style="font-size: 13px; color: var(--text-dim); margin-top: 10px;">
-                    选择支付地区后，系统将使用对应的币种进行 Stripe 支付。账单地址请在左侧「免税地址」页面管理。
+                    此设置用于工具和手动地区配置，不覆盖 CDK 的套餐默认地区：Go 为埃及（EG / EGP），其他套餐为菲律宾（PH / PHP）。账单地址请在左侧「免税地址」页面管理。
                 </p>
                 <div style="display: flex; align-items: center; gap: 12px; margin-top: 18px; flex-wrap: wrap;">
                     <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 180px; max-width: 280px;">
@@ -2342,7 +2392,7 @@
         <div id="proxies" class="page-view">
             <div class="page-header">
                 <h1>代理池</h1>
-                <p>管理 Playwright 自动化使用的代理。一行一条 URL，支持 http(s) / socks5；用户名可含 <code>{session}</code> 占位符走 sticky session。每次任务从「启用」的代理中随机抽取。</p>
+                <p>管理自动化任务的出口代理。支持 HTTP(S) / SOCKS5 和 <code>{session}</code> 粘性会话占位符；任务仅从对应国家标签的已启用代理中随机选择。</p>
             </div>
 
             <div class="panel" style="margin-bottom: 24px;">
@@ -2357,7 +2407,18 @@
 http://user:pass@host:port
 socks5://user:pass@host:port
 http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
-                <div style="display:flex; gap:12px; margin-top: 14px; flex-wrap: wrap; align-items: center;">
+                <div class="proxy-add-toolbar">
+                    <div class="proxy-add-region">
+                        <label for="proxy_add_region">国家标签</label>
+                        <select id="proxy_add_region" class="asset-input">
+                            <option value="">未标记</option>
+                            <option value="PH">菲律宾 (PH)</option>
+                            <option value="US">美国 (US)</option>
+                            <option value="SG">新加坡 (SG)</option>
+                            <option value="MY">马来西亚 (MY)</option>
+                            <option value="EG">埃及 (EG)</option>
+                        </select>
+                    </div>
                     <button type="button" class="btn btn-primary" onclick="saveProxyPool()">
                         <i data-lucide="plus"></i>
                         保存到代理池
@@ -2384,21 +2445,23 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                     </div>
                 </div>
 
+                <div class="proxy-route-note"><span><strong>Go → 埃及</strong> · 使用埃及标签代理</span><span><strong>其他套餐 → 菲律宾</strong> · 使用菲律宾标签代理</span><span>没有匹配的已启用代理时，任务将停止并提示。</span></div>
                 <div class="table-container">
-                    <table>
+                    <table class="proxy-table">
                         <thead>
                             <tr>
-                                <th width="72px" style="text-align:center">启用</th>
-                                <th width="96px" style="text-align:center">活跃检测</th>
-                                <th width="140px">出口 IP</th>
-                                <th width="88px" style="text-align:center">延迟</th>
-                                <th width="88px" style="text-align:center">协议</th>
+                                <th width="64px" style="text-align:center">启用</th>
+                                <th width="160px">国家标签</th>
+                                <th width="82px" style="text-align:center">活跃检测</th>
+                                <th width="136px">出口 IP</th>
+                                <th width="78px" style="text-align:center">延迟</th>
+                                <th width="76px" style="text-align:center">协议</th>
                                 <th>代理地址</th>
-                                <th width="180px" style="text-align:center">操作</th>
+                                <th width="142px" style="text-align:center">操作</th>
                             </tr>
                         </thead>
                         <tbody id="proxy_pool_body">
-                            <tr><td colspan="7">加载中...</td></tr>
+                            <tr><td colspan="8">加载中...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -2420,7 +2483,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                 <div style="font-size:14px; line-height:1.85; color:var(--text-dim);">
                     <p style="margin:0 0 12px;">浏览器池 = 常驻 Chromium + 本地 Profile 缓存。任务通过 CDP 接入，<strong>每单仍独立 Context</strong>（不串 Session）。每槽约 <strong>400–550 MB</strong> 内存。</p>
                     <p style="margin:0 0 12px; padding:10px 12px; background:rgba(251,191,36,0.08); border-radius:8px; border:1px solid rgba(251,191,36,0.2);">
-                        <strong>代理：</strong>池内槽位<strong>不绑定</strong>代理。每单任务启动时，从「代理池」随机抽一条启用代理，写入该单的 <code>Context</code>（见运行日志 <code>proxy=yes</code>）。
+                        <strong>代理：</strong>池内槽位<strong>不绑定</strong>代理。每单任务启动时，按支付地区标签从「代理池」随机抽一条启用代理，写入该单的 <code>Context</code>（Go 默认埃及，其他套餐默认菲律宾）。
                         这样不同任务可用不同 IP，避免多账号共用一个住宅 IP。代理在左侧「代理池」管理，与浏览器池分开配置。
                     </p>
                     <table style="width:100%; border-collapse:collapse; font-size:13px;">
@@ -2632,7 +2695,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 16px;">
                     <div class="form-group" style="margin-bottom: 0;">
                         <label style="margin-bottom: 6px;">套餐类型</label>
-                        <select id="checkout_plan_type" class="asset-input" onchange="syncCheckoutPlanName()">
+                        <select id="checkout_plan_type" class="asset-input" onchange="syncCheckoutPlanName(true)">
                             <option value="go">Go — chatgptgoplan</option>
                             <option value="plus" selected>Plus — chatgptplusplan</option>
                             <option value="pro_10x">Pro 10X — chatgptprolite</option>
@@ -2689,7 +2752,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                         <input type="checkbox" id="checkout_log_autoscroll" checked>
                         <span>自动滚动</span>
                     </label>
-                    <button type="button" class="btn btn-primary" onclick="refreshCheckoutDebugLogs()">
+                    <button type="button" class="btn btn-secondary" onclick="refreshCheckoutDebugLogs()">
                         <i data-lucide="refresh-cw"></i> 刷新
                     </button>
                     <button type="button" class="btn btn-secondary" onclick="switchPage('runtime_logs', document.querySelector('.nav-item[onclick*=\'runtime_logs\']'))">
@@ -4864,6 +4927,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
             if (pId === 'config') {
                 reloadSystemConfigFromServer().catch(() => { });
                 loadAdminSecurityStatus().catch(() => { });
+                loadCaptcharunAccount().catch(() => { });
             }
 
             if (pId === 'admin_login_logs') {
@@ -5459,6 +5523,15 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
         }
 
         let proxyPoolList = [];
+        const proxyRegionPending = new Map();
+        const proxyRegionSaveStates = new Map();
+        const PROXY_REGION_LABELS = { PH: '菲律宾 (PH)', US: '美国 (US)', SG: '新加坡 (SG)', MY: '马来西亚 (MY)', EG: '埃及 (EG)' };
+
+        function renderProxyRegionOptions(regionCode) {
+            return [['', '未标记'], ...Object.entries(PROXY_REGION_LABELS)].map(([code, label]) =>
+                `<option value="${code}" ${code === regionCode ? 'selected' : ''}>${label}</option>`
+            ).join('');
+        }
 
         function renderProxyCheckBadge(item) {
             if (item.last_check_ok === true) {
@@ -5474,15 +5547,18 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
             const tbody = document.getElementById('proxy_pool_body');
             const summary = document.getElementById('proxy_pool_summary');
             if (!tbody) return;
+            const focusedSelect = document.activeElement?.matches('.proxy-region-select') ? document.activeElement.id : '';
 
             if (!proxyPoolList.length) {
-                tbody.innerHTML = '<tr><td colspan="7">暂无代理，请在上方粘贴 URL 后点击「保存到代理池」</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8">暂无代理，请在上方粘贴 URL 后点击「保存到代理池」</td></tr>';
                 if (summary) summary.textContent = '共 0 条，启用 0 条';
                 return;
             }
 
             const activeCount = proxyPoolList.filter((item) => item.is_active).length;
             tbody.innerHTML = proxyPoolList.map((item) => {
+                const pending = proxyRegionPending.get(item.id);
+                const regionCode = pending ? pending.regionCode : (item.region_code || '');
                 const ipCell = item.last_check_ok
                     ? `<code>${escapeHtml(item.last_check_ip || '-')}</code>`
                     : `<span style="color:#f87171;font-size:12px;">${escapeHtml(item.last_check_error || '—')}</span>`;
@@ -5491,20 +5567,28 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                     <tr id="proxy_row_${item.id}">
                         <td style="text-align:center;">
                             <label class="toggle-control" style="justify-content:center;">
-                                <input type="checkbox" class="toggle-input" ${item.is_active ? 'checked' : ''} onchange="toggleProxyActive(${item.id}, this.checked)">
+                                <input type="checkbox" class="toggle-input" aria-label="启用代理 ${item.id}" ${item.is_active ? 'checked' : ''} ${pending ? 'disabled' : ''} onchange="toggleProxyActive(${item.id}, this.checked)">
                                 <span class="toggle-switch"></span>
                             </label>
+                        </td>
+                        <td>
+                            <select class="asset-input proxy-region-select" id="proxy_region_${item.id}" data-region="${escapeHtml(regionCode)}" aria-label="代理 ${item.id} 的国家标签" ${pending ? 'disabled' : ''} onchange="setProxyRegion(${item.id}, this.value, this)">
+                                ${renderProxyRegionOptions(regionCode)}
+                            </select>
+                            <span class="proxy-save-state" id="proxy_region_state_${item.id}" aria-live="polite">${pending ? '保存中…' : escapeHtml(proxyRegionSaveStates.get(item.id) || '')}</span>
                         </td>
                         <td style="text-align:center;" id="proxy_check_${item.id}">${renderProxyCheckBadge(item)}</td>
                         <td id="proxy_ip_${item.id}">${ipCell}</td>
                         <td style="text-align:center;" id="proxy_lat_${item.id}">${latency}</td>
                         <td style="text-align:center;"><code>${escapeHtml(item.protocol || '-')}</code></td>
-                        <td><code style="font-size:12px; word-break:break-all;">${escapeHtml(item.proxy_url_masked || item.proxy_url || '')}</code></td>
+                        <td class="proxy-url-cell"><code>${escapeHtml(item.proxy_url_masked || item.proxy_url || '')}</code></td>
                         <td style="text-align:center;">
-                            <button type="button" class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="testSavedProxy(${item.id})">检测</button>
-                            <button type="button" class="btn-delete" onclick="deleteSavedProxy(${item.id})" title="删除">
+                            <div class="proxy-actions">
+                            <button type="button" class="btn btn-secondary" onclick="testSavedProxy(${item.id})">检测</button>
+                            <button type="button" class="btn-delete" ${pending ? 'disabled' : ''} onclick="deleteSavedProxy(${item.id})" title="删除" aria-label="删除代理 ${item.id}">
                                 <i data-lucide="trash-2"></i>
                             </button>
+                            </div>
                         </td>
                     </tr>
                 `;
@@ -5514,6 +5598,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                 summary.textContent = `共 ${proxyPoolList.length} 条，启用 ${activeCount} 条`;
             }
             lucide.createIcons();
+            if (focusedSelect) document.getElementById(focusedSelect)?.focus();
         }
 
         let browserPoolRefreshTimer = null;
@@ -5705,6 +5790,47 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
             renderProxyPoolTable();
         }
 
+        async function setProxyRegion(id, regionCode, select) {
+            if (proxyRegionPending.has(id)) {
+                if (select) select.value = proxyRegionPending.get(id).regionCode;
+                return;
+            }
+            const previous = proxyPoolList.find(item => item.id === id)?.region_code || '';
+            if (regionCode && !Object.hasOwn(PROXY_REGION_LABELS, regionCode)) {
+                if (select) select.value = previous;
+                return;
+            }
+            const restoreFocus = document.activeElement === select;
+            proxyRegionPending.set(id, { regionCode, previous });
+            proxyRegionSaveStates.delete(id);
+            renderProxyPoolTable();
+            let saved = false;
+            try {
+                const res = await authFetch(`/api/admin/proxies/${id}`, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ region_code: regionCode })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) throw new Error(data.error || data.message || '国家标签保存失败');
+                saved = true;
+                const item = proxyPoolList.find(item => item.id === id);
+                if (item) item.region_code = regionCode;
+                await loadProxyPool();
+                showMessage('国家标签已保存', 'success');
+            } catch (error) {
+                if (saved) {
+                    const item = proxyPoolList.find(item => item.id === id);
+                    if (item) item.region_code = regionCode;
+                }
+                proxyRegionSaveStates.set(id, saved ? '已保存，刷新失败' : '保存失败，已恢复');
+                showMessage(escapeHtml(saved ? '标签已保存，但列表刷新失败，请点击刷新确认。' : (error.message || '国家标签保存失败')), 'error');
+            } finally {
+                proxyRegionPending.delete(id);
+                renderProxyPoolTable();
+                if (restoreFocus && document.activeElement === document.body) document.getElementById(`proxy_region_${id}`)?.focus();
+            }
+        }
+
         async function saveProxyPool() {
             const input = document.getElementById('proxy_add_input');
             const hint = document.getElementById('proxy_add_hint');
@@ -5718,7 +5844,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                 const res = await authFetch('/api/admin/proxies', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ proxies: lines.split(/\r?\n/) })
+                    body: JSON.stringify({ proxies: lines.split(/\r?\n/), region_code: document.getElementById('proxy_add_region')?.value || '' })
                 });
                 const data = await res.json();
                 if (!res.ok || !data.success) {
@@ -6749,6 +6875,135 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
             }
         }
 
+        // CaptchaRun has a separate Bearer-token account API; it must not be
+        // passed to the legacy provider's clientKey/autodetection settings.
+        let captcharunAccountLoaded = false;
+        let captcharunAccountBusy = false;
+        let captcharunTokenConfigured = false;
+        let captcharunSavedTimeout = '20';
+
+        function invalidateCaptcharunWallet() {
+            const wallet = document.getElementById('captcharun_wallet');
+            if (!wallet.hidden) {
+                wallet.hidden = true;
+                document.getElementById('captcharun_status').textContent = '账户配置已修改，请重新测试连接。';
+            }
+        }
+
+        function setCaptcharunAccountBusy(busy) {
+            captcharunAccountBusy = busy;
+            for (const id of ['captcharun_api_token', 'captcharun_timeout', 'captcharun_test_btn', 'captcharun_save_btn']) {
+                document.getElementById(id).disabled = busy || !captcharunAccountLoaded;
+            }
+            document.getElementById('captcharun_clear_btn').disabled = busy || !captcharunAccountLoaded || !captcharunTokenConfigured;
+            document.getElementById('captcharun_reload_btn').disabled = busy;
+            document.getElementById('captcharun_account_panel').setAttribute('aria-busy', String(busy));
+        }
+
+        function applyCaptcharunAccount(config) {
+            captcharunTokenConfigured = Boolean(config.api_token_saved);
+            const token = document.getElementById('captcharun_api_token');
+            token.value = '';
+            token.placeholder = captcharunTokenConfigured ? '已配置，留空不修改' : '输入 CaptchaRun Token';
+            document.getElementById('captcharun_timeout').value = config.timeout_sec;
+            captcharunSavedTimeout = String(config.timeout_sec);
+            const source = config.token_source === 'environment' ? '环境变量' : '数据库';
+            document.getElementById('captcharun_token_hint').textContent = captcharunTokenConfigured
+                ? `Token 已配置（来源：${source}），留空保存会保留。`
+                : '尚未配置 Token。';
+        }
+
+        function captcharunAccountPayload() {
+            const seconds = Number(document.getElementById('captcharun_timeout').value);
+            if (!Number.isInteger(seconds) || seconds < 5 || seconds > 120) {
+                throw new Error('连接超时须为 5–120 秒的整数');
+            }
+            return { api_token: document.getElementById('captcharun_api_token').value.trim(), timeout_sec: seconds };
+        }
+
+        async function loadCaptcharunAccount(force = false) {
+            if (captcharunAccountBusy || (captcharunAccountLoaded && !force)) return;
+            const hasUnsavedChanges = document.getElementById('captcharun_api_token').value ||
+                document.getElementById('captcharun_timeout').value !== captcharunSavedTimeout;
+            if (force && captcharunAccountLoaded && hasUnsavedChanges &&
+                !await showAdminConfirm('重新加载会丢弃尚未保存的账户配置，是否继续？', '重新加载配置')) return;
+            setCaptcharunAccountBusy(true);
+            document.getElementById('captcharun_wallet').hidden = true;
+            const status = document.getElementById('captcharun_status');
+            try {
+                const response = await authFetch('/api/admin/captcharun');
+                const data = await readApiJson(response, '加载 CaptchaRun 配置失败');
+                if (!response.ok || !data.success || !data.config) throw new Error(data.message || '加载配置失败');
+                applyCaptcharunAccount(data.config);
+                captcharunAccountLoaded = true;
+                status.textContent = '账户配置已加载。';
+            } catch (error) {
+                status.textContent = error.message || '加载配置失败，请重试。';
+            } finally {
+                setCaptcharunAccountBusy(false);
+            }
+        }
+
+        async function saveCaptcharunAccount(clearToken = false) {
+            if (captcharunAccountBusy || !captcharunAccountLoaded) return;
+            const status = document.getElementById('captcharun_status');
+            try {
+                const payload = clearToken
+                    ? { clear_token: true, timeout_sec: captcharunAccountPayload().timeout_sec }
+                    : captcharunAccountPayload();
+                setCaptcharunAccountBusy(true);
+                const response = await authFetch('/api/admin/captcharun', {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                });
+                const data = await readApiJson(response, '保存 CaptchaRun 配置失败');
+                if (!response.ok || !data.success || !data.config) throw new Error(data.message || '保存失败');
+                applyCaptcharunAccount(data.config);
+                document.getElementById('captcharun_wallet').hidden = true;
+                status.textContent = clearToken ? '当前生效的 Token 已清除。' : '账户配置已保存。';
+                showMessage(clearToken ? 'CaptchaRun Token 已清除' : 'CaptchaRun 账户配置已保存', 'success');
+            } catch (error) {
+                status.textContent = error.message || '保存失败。';
+                showMessage(escapeHtml(status.textContent), 'error');
+            } finally {
+                setCaptcharunAccountBusy(false);
+            }
+        }
+
+        async function clearCaptcharunToken() {
+            if (captcharunAccountBusy || !captcharunTokenConfigured) return;
+            const pending = document.getElementById('captcharun_api_token').value ? '输入中的未保存 Token 也会被丢弃。' : '';
+            const confirmed = await showAdminConfirm(`清除当前生效的 Token？${pending}如果 Token 来自环境变量，将保存一条空配置覆盖它，但不会修改环境变量本身。`, '清除 CaptchaRun Token');
+            if (confirmed) await saveCaptcharunAccount(true);
+        }
+
+        async function testCaptcharunAccount() {
+            if (captcharunAccountBusy || !captcharunAccountLoaded) return;
+            const status = document.getElementById('captcharun_status');
+            const wallet = document.getElementById('captcharun_wallet');
+            wallet.hidden = true;
+            try {
+                const payload = captcharunAccountPayload();
+                setCaptcharunAccountBusy(true);
+                status.textContent = '正在查询 CaptchaRun 账户…';
+                const response = await authFetch('/api/admin/captcharun/test', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                });
+                const data = await readApiJson(response, 'CaptchaRun 测试失败');
+                if (!response.ok || !data.success || !data.wallet) throw new Error(data.message || '账户测试失败');
+                for (const [id, key] of [['balance', 'balance'], ['credit', 'credit'], ['recharge', 'cumulativeRecharge'], ['share', 'share']]) {
+                    document.getElementById(`captcharun_${id}`).textContent = data.wallet[key] ?? '—';
+                }
+                wallet.hidden = false;
+                status.textContent = `${data.message || '账户连接正常'}${payload.api_token ? '（使用未保存的 Token）' : ''}`;
+                showMessage('CaptchaRun 账户连接正常', 'success');
+            } catch (error) {
+                status.textContent = error.message || '账户测试失败。';
+                showMessage(escapeHtml(status.textContent), 'error');
+            } finally {
+                setCaptcharunAccountBusy(false);
+            }
+        }
+
         function loadHcaptchaConfig(hcaptcha) {
             const cfg = hcaptcha || {};
             const setValue = (id, value, placeholder) => {
@@ -7686,6 +7941,8 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
         let regionAddressList = [];
         let currentRegion = 'PH';
         let checkoutPlanMap = { go: 'chatgptgoplan', plus: 'chatgptplusplan', pro_10x: 'chatgptprolite', pro_20x: 'chatgptpro', pro_50x: 'chatgptpromax' };
+        let checkoutDefaultRegions = { go: 'EG', plus: 'PH', pro_10x: 'PH', pro_20x: 'PH', pro_50x: 'PH' };
+        let checkoutDebugInitialized = false;
         let checkoutDebugJobKey = '';
         let checkoutDebugLogAfter = 0;
         let checkoutDebugLogText = '';
@@ -7873,7 +8130,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
             syncCheckoutPlanName();
             const planName = getCheckoutPlanNameForSubmit();
             const regionSel = document.getElementById('checkout_region_selector');
-            const region = regionSel?.value || currentRegion;
+            const region = regionSel?.value || checkoutDefaultRegions[planType] || 'PH';
             const btn = document.getElementById('checkout_generate_btn');
 
             if (!sessionRaw) {
@@ -7924,18 +8181,22 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
         }
 
         function onCheckoutRegionChange() {
+            checkoutDebugInitialized = true;
             const sel = document.getElementById('checkout_region_selector');
-            if (sel) currentRegion = sel.value || currentRegion;
-            const labels = { PH: '菲律宾 / PHP', US: '美国 / USD', SG: '新加坡 / SGD', MY: '马来西亚 / MYR', EG: '埃及 / EGP' };
-            updateCheckoutRegionHint(labels[currentRegion] || currentRegion, '');
+            const region = sel?.value || 'PH';
+            const currencies = { PH: 'PHP', US: 'USD', SG: 'SGD', MY: 'MYR', EG: 'EGP' };
+            updateCheckoutRegionHint(PROXY_REGION_LABELS[region] || region, currencies[region] || '');
         }
 
         async function loadCheckoutDebugPage() {
-            await loadRegionConfig();
-            await loadCheckoutPlans();
-            const sel = document.getElementById('checkout_region_selector');
-            if (sel) sel.value = currentRegion;
+            if (!checkoutDebugInitialized) {
+                const plan = document.getElementById('checkout_plan_type')?.value || 'plus';
+                const sel = document.getElementById('checkout_region_selector');
+                if (sel) sel.value = checkoutDefaultRegions[plan] || 'PH';
+                checkoutDebugInitialized = true;
+            }
             onCheckoutRegionChange();
+            await loadCheckoutPlans();
             lucide.createIcons();
         }
 
@@ -7951,13 +8212,19 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
             syncCheckoutPlanName();
         }
 
-        function syncCheckoutPlanName() {
+        function syncCheckoutPlanName(resetRegion = false) {
             const planType = document.getElementById('checkout_plan_type')?.value || 'plus';
             const input = document.getElementById('checkout_plan_name');
             const mapped = checkoutPlanMap[planType] || checkoutPlanMap.plus || 'chatgptplusplan';
-            if (input) {
+            if (input && (resetRegion || !input.value || input.value === input.dataset.autoValue)) {
                 input.value = mapped;
                 input.dataset.autoValue = mapped;
+            }
+            if (resetRegion) {
+                checkoutDebugInitialized = true;
+                const regionSelector = document.getElementById('checkout_region_selector');
+                if (regionSelector) regionSelector.value = checkoutDefaultRegions[planType] || 'PH';
+                onCheckoutRegionChange();
             }
         }
 
@@ -7976,7 +8243,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
         function updateCheckoutRegionHint(label, currency) {
             const hint = document.getElementById('checkout_region_hint');
             if (hint) {
-                hint.textContent = `将使用: ${label || currentRegion} / ${currency || ''}`;
+                hint.textContent = `本次调试：${label}${currency ? ` / ${currency}` : ''} · 使用同国家标签的已启用代理；可手动调整，不更改全局设置。`;
             }
         }
 
@@ -7986,8 +8253,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                 const data = await res.json();
                 if (data.success && data.plans) {
                     checkoutPlanMap = data.plans;
+                    if (data.default_regions) {
+                        Object.entries(data.default_regions).forEach(([plan, region]) => {
+                            if (Object.hasOwn(PROXY_REGION_LABELS, region)) checkoutDefaultRegions[plan] = region;
+                        });
+                    }
                     renderCheckoutPlanTypeOptions();
-                    updateCheckoutRegionHint(data.label, data.currency);
                 }
             } catch (e) {
                 renderCheckoutPlanTypeOptions();
@@ -8004,7 +8275,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                     if (sel) sel.value = currentRegion;
                     const badge = document.getElementById('region_current_badge');
                     if (badge) badge.textContent = `当前: ${data.label || currentRegion} (${data.currency || 'USD'})`;
-                    updateCheckoutRegionHint(data.label, data.currency);
                 }
             } catch (e) {
                 console.error('loadRegionConfig failed', e);
@@ -8031,7 +8301,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                 currentRegion = data.region;
                 const badge = document.getElementById('region_current_badge');
                 if (badge) badge.textContent = `当前: ${data.label || currentRegion} (${data.currency || 'USD'})`;
-                updateCheckoutRegionHint(data.label, data.currency);
                 showMessage('支付地区已更新', 'success');
             } catch (e) {
                 showMessage(e.message || '保存地区失败', 'error');
@@ -8434,6 +8703,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
 
         bootAdmin();
     </script>
+    <script src="/admin-ui.js"></script>
 </body>
 
 </html>

@@ -10,3 +10,4 @@ data/browser-pool
 .DS_Store
 .vscode
 .idea
+.oil-ui

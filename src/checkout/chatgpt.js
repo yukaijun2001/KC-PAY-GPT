@@ -2,7 +2,7 @@
 
 const axios = require('axios');
 const store = require('../persistence/mysql-store');
-const { getRegionConfig } = require('../config/region-config');
+const { getRegionConfig, getPlanPaymentRegion } = require('../config/region-config');
 const { normalizePlanType } = require('../config/plans');
 const { executePaymentWithRetry } = require('../payments/payment-retry');
 const { requestBrowserCheckout } = require('./checkout-browser-request');
@@ -334,7 +334,7 @@ async function activateSubscription({ page, accessToken, planType, cdkCode, emai
     const notify = typeof onProgress === 'function' ? onProgress : () => {};
 
     // Step 1: Resolve billing region and currency
-    const region = await store.getPaymentRegion();
+    const region = getPlanPaymentRegion(planType, process.env.PAYMENT_REGION_OVERRIDE);
     const regionConfig = getRegionConfig(region);
     if (!regionConfig) {
         return { success: false, error: `不支持的支付地区: ${region}` };

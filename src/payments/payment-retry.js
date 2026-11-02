@@ -13,7 +13,7 @@
 const store = require('../persistence/mysql-store');
 const { completeStripeCardPayment, readCheckoutDueAmount, estimateTaxFreeAmount } = require('./stripe-payment');
 const { pickBillingAddressForCheckout, markAddressBound } = require('./tax-free-address');
-const { getRegionConfig } = require('../config/region-config');
+const { getRegionConfig, getPlanPaymentRegion } = require('../config/region-config');
 
 const MAX_CARD_ATTEMPTS = Number(process.env.PAYMENT_MAX_CARD_ATTEMPTS) || 3;
 const MAX_AUTOMATION_ATTEMPTS = MAX_CARD_ATTEMPTS;
@@ -73,8 +73,12 @@ async function executePaymentWithRetry(page, options) {
         }
     };
 
-    const regionOverride = String(process.env.PAYMENT_REGION_OVERRIDE || '').trim().toUpperCase();
-    const region = regionOverride || await store.getPaymentRegion();
+    let region;
+    try {
+        region = getPlanPaymentRegion(planType, options?.region || process.env.PAYMENT_REGION_OVERRIDE);
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
     const regionConfig = getRegionConfig(region);
     if (!regionConfig) {
         return { success: false, error: '不支持的支付地区配置' };

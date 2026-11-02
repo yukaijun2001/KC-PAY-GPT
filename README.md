@@ -86,7 +86,7 @@ test -e .env || cp .env.example .env
 ```env
 DB_PASSWORD=your_strong_mysql_password   # MySQL root 密码
 ADMIN_PASSWORD=your_admin_password         # 后台登录密码
-PROXY=http://user:pass@proxy-host:port     # 本地自動化或第三方訂單代理（選填）
+PROXY=http://user:pass@proxy-host:port     # 仅 CLI 显式代理；后台任务按代理池国家标签选择
 BROWSER_POOL=0                              # 可选：关闭浏览器池；后台设置优先
 ```
 
@@ -346,6 +346,8 @@ sudo certbot --nginx -d your-domain.com
 | **CDK 兑换** | Go / Plus / Pro 10X / Pro 20X / Pro 50X 五档套餐，一卡一充 |
 | **信用卡卡池** | 批量导入、智能选卡、冷却机制、Stripe 拒卡自动报废、失败换卡重试 |
 | **支付地区** | PH / US / SG / MY / EG（埃及，EGP）可切换 |
+| **套餐代理路由** | Go 默认 EG/EGP，其余套餐默认 PH/PHP；仅选取对应国家标签且已启用的代理 |
+| **管理员工作台** | 深色导航与浅色内容区，适配窄屏抽屉；页面、面板、操作反馈与状态动效支持减少动态效果 |
 | **账单审计** | 自动记录每笔支付，支持筛选与 CSV 导出 |
 | **瀏覽器池** | 本地自动化的可选多槽位模式；未配置时默认启用，可设 `BROWSER_POOL=0` 关闭 |
 | **hCaptcha** | VLM / 打码平台 / Python solver 多通道 |
@@ -354,6 +356,22 @@ sudo certbot --nginx -d your-domain.com
 | **并发 & 维护模式** | 前台并发上限、维护开关，保存即生效 |
 
 ---
+
+### 代理国家标签与套餐默认地区
+
+- 在后台「代理池」导入或编辑代理时，由管理员手动选择国家标签：菲律宾 PH、美国 US、新加坡 SG、马来西亚 MY、埃及 EG。
+- 用户卡密充值及后台 Session 手动开通按 CDK 套餐路由：Go 使用埃及 EG/EGP；Plus、Pro 10X、Pro 20X、Pro 50X 使用菲律宾 PH/PHP。第三方代充订单也传入相同的国家、币种与代理。
+- 每次任务从对应国家标签且已启用的代理中随机选择；同一任务沿用选定的代理及 sticky session，不因 API/UI 回退重新选出口。
+- 没有匹配代理时任务明确失败，不回退到其他国家、未标记代理或直连。已存在的代理默认「未标记」，升级后先在代理池手动标记并启用。
+- 支付链接调试在切换套餐时带入默认地区，管理员仍可手动选择其他支持地区，此时使用所选地区标签的代理。后台全局地区设置不覆盖 CDK 充值的套餐默认规则。
+- 国家标签是管理员的配置，不是出口 IP 地理位置认证；活跃检测只确认连通性与出口 IP，不证明代理所在地或上游可接受。
+
+### CaptchaRun 账户管理
+
+- 在「系统配置 → CaptchaRun 账户」填写 Token，可保存、查询余额和测试连通性；测试未保存的 Token 不会写入配置。Token 留空保存表示不修改，清除操作需要确认。
+- 此账户配置独立于上方 hCaptcha 的其他打码平台，**目前不接入支付验证码自动求解**。不要把 CaptchaRun Token 填到现有平台的 API Key 字段中。
+- 可选用环境变量 `CAPTCHARUN_API_TOKEN` 和 `CAPTCHARUN_TIMEOUT_SEC`（5–120 秒，默认 20 秒）；后台保存的 Token 优先。清除操作会用空数据库配置覆盖环境变量，但不会删除环境变量本身。Token 在数据库中存储，接口不会返回明文。
+- 余额查询使用 CaptchaRun 的 [GET /v2/users/self/wallet](https://captcharun.atlassian.net/wiki/spaces/captcharunnew/pages/463111320/v2+users+self+wallet) 及 Bearer Token。金额保留平台返回的精度，单位以平台账户为准。
 
 ## 架构概览
 

@@ -8,7 +8,7 @@ const unusualActivity = 'API 创建 Checkout 失败: Our systems have detected u
 const checkoutUrl = 'https://chatgpt.com/checkout/openai_llc/cs_test_debug';
 
 // Run the actual worker without starting MySQL, a browser, or a payment.
-async function runDebugWorker({ mode = 'auto', apiError, uiError, launchError, installError, fallbackLaunchError, env = {} } = {}) {
+async function runDebugWorker({ mode = 'auto', apiError, uiError, launchError, installError, fallbackLaunchError, env = {}, proxy = 'http://regional-proxy.invalid:8080' } = {}) {
     const output = [];
     const page = {
         on: vi.fn(),
@@ -51,15 +51,20 @@ async function runDebugWorker({ mode = 'auto', apiError, uiError, launchError, i
         return { sessionData: {}, cookieVerified: true };
     });
     const bootstrapChatGptSession = vi.fn(async () => ({ session: { accessToken: 'test-token' } }));
+    const getActiveProxy = vi.fn(async () => proxy);
+    const preparePlaywrightProxy = vi.fn(async () => ({ proxyConfig: null, cleanup: proxyCleanup }));
     const modules = {
         './src/payments/payment-retry': { executePaymentWithRetry },
         './src/checkout/pricing-checkout': { openPricingCheckout },
         './src/checkout/chatgpt': { openApiCheckout },
-        './src/persistence/mysql-store': { getPaymentRegion: async () => 'PH', resolvePlanName: () => 'chatgptplusplan' },
+        './src/persistence/mysql-store': {
+            getPaymentRegion: async () => 'PH', resolvePlanName: () => 'chatgptplusplan',
+            getActiveProxy
+        },
         './src/config/region-config': require('../src/config/region-config'),
         './src/browser/session-auth': { installChatGptSession, bootstrapChatGptSession },
         './src/browser/browser-runtime': { connectTaskBrowser, applyCdpEnv: vi.fn(), closeTaskBrowser },
-        './src/browser/playwright-proxy': { preparePlaywrightProxy: async () => ({ proxyConfig: null, cleanup: proxyCleanup }) },
+        './src/browser/playwright-proxy': { preparePlaywrightProxy },
         fs: { mkdirSync: vi.fn() },
         path
     };
@@ -86,11 +91,40 @@ async function runDebugWorker({ mode = 'auto', apiError, uiError, launchError, i
         output: output.join('\n'), workerProcess, page, context, browser,
         openApiCheckout, openPricingCheckout, executePaymentWithRetry,
         connectTaskBrowser, closeTaskBrowser, proxyCleanup,
-        installChatGptSession, bootstrapChatGptSession
+        installChatGptSession, bootstrapChatGptSession, getActiveProxy, preparePlaywrightProxy
     };
 }
 
 describe('checkout debug worker', () => {
+    it.each([['go', 'EG', 'EGP', 'Africa/Cairo'], ['pro_50x', 'PH', 'PHP', 'Asia/Manila']])('chooses %s region before launching the browser', async (planType, country, currency, timezoneId) => {
+        const run = await runDebugWorker({ env: { CDK_PLAN_TYPE: planType } });
+        expect(run.getActiveProxy).toHaveBeenCalledExactlyOnceWith(country);
+        expect(run.getActiveProxy.mock.invocationCallOrder[0]).toBeLessThan(run.connectTaskBrowser.mock.invocationCallOrder[0]);
+        expect(run.openApiCheckout.mock.calls[0][1]).toMatchObject({ planType, country, currency });
+        expect(run.browser.newContext.mock.calls[0][0].timezoneId).toBe(timezoneId);
+    });
+
+    it('keeps the server-selected sticky proxy without choosing another pool entry', async () => {
+        const proxy = 'http://selected-sticky.invalid:8080';
+        const run = await runDebugWorker({ env: { CDK_PLAN_TYPE: 'go', PAYMENT_REGION_OVERRIDE: 'EG', PROXY: proxy } });
+        expect(run.getActiveProxy).not.toHaveBeenCalled();
+        expect(run.preparePlaywrightProxy).toHaveBeenCalledExactlyOnceWith(proxy);
+    });
+
+    it.each([{ PAYMENT_REGION_OVERRIDE: 'ZZ' }, { CDK_PLAN_TYPE: 'pro_5x' }])('rejects invalid route configuration before browser startup', async env => {
+        const run = await runDebugWorker({ env });
+        expect(run.connectTaskBrowser).not.toHaveBeenCalled();
+        expect(run.openApiCheckout).not.toHaveBeenCalled();
+        expect(run.workerProcess.exitCode).toBe(1);
+    });
+
+    it('fails rather than launching directly when no matching proxy exists', async () => {
+        const run = await runDebugWorker({ env: { CDK_PLAN_TYPE: 'go' }, proxy: '' });
+        expect(run.getActiveProxy).toHaveBeenCalledExactlyOnceWith('EG');
+        expect(run.connectTaskBrowser).not.toHaveBeenCalled();
+        expect(run.workerProcess.exitCode).toBe(1);
+    });
+
     it('falls back to a headed UI after the reported API error, without making a payment', async () => {
         const run = await runDebugWorker({ apiError: unusualActivity });
         expect(run.output).toContain(unusualActivity);

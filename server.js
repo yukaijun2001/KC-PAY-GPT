@@ -8,13 +8,14 @@ const WebSocket = require('ws');
 const axios = require('axios');
 const store = require('./src/persistence/mysql-store');
 const runtimeLog = require('./src/runtime/runtime-log');
-const { REGION_CONFIG, isSupportedRegion, getPlanTypeLabel } = require('./src/config/region-config');
+const { REGION_CONFIG, PLAN_PAYMENT_REGIONS, isSupportedRegion, getPlanTypeLabel, getPlanPaymentRegion } = require('./src/config/region-config');
 const { normalizePlanType } = require('./src/config/plans');
 const taxFreeAddress = require('./src/payments/tax-free-address');
 const { testProxyUrl, normalizeProxyLines } = require('./src/proxy/proxy-pool');
 const { extractSessionPreview, extractAccessTokenFromRaw, parseSessionJson, extractEmailFromSession } = require('./src/browser/session-auth');
 const { notifyTelegramEvent, notifyAdminSecurityEvent, sendTelegramLoginCode, sendTelegramTest, isCardPoolExhaustedIssue } = require('./src/integrations/telegram-notify');
 const adminAuth = require('./src/admin/admin-auth');
+const { createCaptcharunRouter } = require('./src/admin/captcharun-routes');
 const { buildAdminLoginUrl, buildAdminPanelUrl } = require('./src/admin/admin-paths');
 const { buildHcaptchaEnvFromConfig } = require('./src/captcha/hcaptcha-runtime');
 const { checkHcaptchaSolverHealth, testVlmConnectivity, listSolverLogFiles, readSolverLogTail } = require('./src/captcha/hcaptcha-solver');
@@ -1605,6 +1606,7 @@ app.post('/api/public/subscription/check', async (req, res) => {
 });
 
 app.use('/api/admin', authenticateAdmin);
+app.use('/api/admin/captcharun', createCaptcharunRouter({ store, ensureStoreReady }));
 
 app.get('/subscription', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'subscription.html'));
@@ -2566,6 +2568,7 @@ app.get('/api/admin/checkout/plans', async (req, res) => {
             success: true,
             plans: store.PLAN_NAME_MAP,
             resolved: { ...store.PLAN_NAME_MAP },
+            default_regions: PLAN_PAYMENT_REGIONS,
             region: regionCode,
             currency: config.currency,
             label: config.label
@@ -2598,7 +2601,12 @@ app.post('/api/admin/checkout/generate', async (req, res) => {
         if (!planType) return res.status(400).json({ success: false, error: '不支持的套餐类型' });
         const planNameOverride = body.plan_name ? String(body.plan_name).trim() : '';
         const resolvedPlanName = planNameOverride || store.resolvePlanName(planType);
-        const regionCode = String(body.country || body.region || await store.getPaymentRegion()).toUpperCase();
+        let regionCode;
+        try {
+            regionCode = getPlanPaymentRegion(planType, body.country || body.region);
+        } catch (error) {
+            return res.status(400).json({ success: false, error: error.message });
+        }
         if (!isSupportedRegion(regionCode)) {
             return res.status(400).json({ success: false, error: `不支持的地区: ${regionCode}` });
         }
@@ -2776,7 +2784,14 @@ app.post('/api/admin/proxies', async (req, res) => {
     try {
         await ensureStoreReady();
         const input = req.body?.proxies ?? req.body?.proxy_url ?? req.body?.proxy ?? '';
-        const result = await store.addProxyAssets(input);
+        if (req.body?.region_code !== undefined && typeof req.body.region_code !== 'string') {
+            return res.status(400).json({ success: false, error: '代理国家标签必须是地区代码' });
+        }
+        const regionCode = String(req.body?.region_code || '').trim().toUpperCase();
+        if (regionCode && !isSupportedRegion(regionCode)) {
+            return res.status(400).json({ success: false, error: '不支持的代理国家标签' });
+        }
+        const result = await store.addProxyAssets(input, regionCode);
         if (!result.success) {
             return res.status(400).json(result);
         }
@@ -2790,7 +2805,23 @@ app.put('/api/admin/proxies/:id', async (req, res) => {
     try {
         await ensureStoreReady();
         const id = req.params.id;
-        if (Object.prototype.hasOwnProperty.call(req.body || {}, 'is_active')) {
+        const hasActive = Object.prototype.hasOwnProperty.call(req.body || {}, 'is_active');
+        const hasRegion = Object.prototype.hasOwnProperty.call(req.body || {}, 'region_code');
+        if (hasActive && hasRegion) {
+            return res.status(400).json({ success: false, error: '请分别更新启用状态和国家标签' });
+        }
+        if (hasRegion) {
+            if (typeof req.body.region_code !== 'string') {
+                return res.status(400).json({ success: false, error: '代理国家标签必须是地区代码' });
+            }
+            const regionCode = req.body.region_code.trim().toUpperCase();
+            if (regionCode && !isSupportedRegion(regionCode)) {
+                return res.status(400).json({ success: false, error: '不支持的代理国家标签' });
+            }
+            const result = await store.setProxyAssetRegion(id, regionCode);
+            return res.status(result.success ? 200 : 404).json(result);
+        }
+        if (hasActive) {
             const result = await store.setProxyAssetActive(id, Boolean(req.body.is_active));
             if (!result.success) {
                 return res.status(404).json(result);
@@ -3130,7 +3161,9 @@ function spawnCheckoutDebugWorker({ task, token, sessionRaw, planType, region, p
     return (async () => {
         const checkoutScript = path.join(__dirname, 'index.js');
         try {
-            const proxy = await store.getActiveProxy();
+            const paymentRegion = getPlanPaymentRegion(planType, region);
+            const proxy = await store.getActiveProxy(paymentRegion);
+            if (!proxy) throw new Error(`没有启用的 ${paymentRegion} 国家标签代理，请先在代理池设置标签并启用`);
             const hcaptchaCfg = await store.getHcaptchaConfig();
             const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
             const runtimeEnv = {
@@ -3141,14 +3174,14 @@ function spawnCheckoutDebugWorker({ task, token, sessionRaw, planType, region, p
                 CHATGPT_TOKEN: token,
                 CHATGPT_SESSION_JSON: String(sessionRaw || '').startsWith('{') ? sessionRaw : '',
                 CDK_PLAN_TYPE: planType,
-                PAYMENT_REGION_OVERRIDE: region,
+                PAYMENT_REGION_OVERRIDE: paymentRegion,
                 PLAN_NAME_OVERRIDE: planNameOverride || '',
                 CDK_CODE: '',
                 ACTIVATION_EMAIL: email || '',
                 PROXY: proxy
             };
 
-            logTask(task.jobKey, `启动 Playwright 浏览器 proxy=${proxy ? 'yes' : 'no'}`);
+            logTask(task.jobKey, `启动 Playwright 浏览器 region=${paymentRegion} proxy_label=${paymentRegion} proxy=yes`);
             const run = await spawnWorkerWithBrowser({
                 jobKey: task.jobKey,
                 runtimeEnv,
@@ -3200,8 +3233,8 @@ function spawnCheckoutDebugWorker({ task, token, sessionRaw, planType, region, p
  * 第三方 GPT 代充 API 任务 Worker（协议见 协议api.md）
  *
  * 流程：
- * 1. 读取后台配置（base_url / api_key / plan_key / country / currency / enabled）
- * 2. 从银行卡池预留一张卡作为 new_card（可选，失败则跳过）
+ * 1. 读取第三方连接配置并解析 CDK 套餐；地区/币种按套餐默认值
+ * 2. 选定同国家标签代理后，从银行卡池预留一张卡作为 new_card
  * 3. POST /pay 提交代充（带 Idempotency-Key = `cdk-${cdk}`）
  * 4. 轮询订单/任务状态，直到终态（success / failed）
  * 5. 将结果写回 task_logs（含 gpt_api_order_id / gpt_api_task_id / gpt_api_raw）
@@ -3271,10 +3304,11 @@ async function runGptApiWorker({ task, token, session, cdk, planType, cancelAuto
         }
         logTask(jobKey, 'Session 本機格式／有效期檢查通過；上游將於代充任務中驗證登入狀態');
 
-        const proxy = await store.getActiveProxy();
-        logTask(jobKey, proxy
-            ? `第三方 API 协议代理 ${maskProxyForLog(proxy)}`
-            : '第三方 API 使用平台启用代理池');
+        const paymentRegion = getPlanPaymentRegion(planType);
+        const paymentCurrency = REGION_CONFIG[paymentRegion].currency;
+        const proxy = await store.getActiveProxy(paymentRegion);
+        if (!proxy) throw new Error(`没有启用的 ${paymentRegion} 国家标签代理，请先在代理池设置标签并启用`);
+        logTask(jobKey, `第三方 API 订阅地区=${paymentRegion} 币种=${paymentCurrency} proxy_label=${paymentRegion}`);
 
         // 本機检查通过后才从卡池预留一张卡，避免无效 Session 占用资产。
         let newCard = null;
@@ -3289,18 +3323,18 @@ async function runGptApiWorker({ task, token, session, cdk, planType, cancelAuto
             exp_year: expiry.year,
             cvc: reservedCard.card_cvc,
             name: reservedCard.card_holder || 'API User',
-            country: cfg.country || 'PH'
+            country: paymentRegion
         };
         logTask(jobKey, `第三方 API 使用卡池预留卡 ...${String(reservedCard.card_number || '').slice(-4)}`);
 
-        // 套餐从 CDK 的 plan_type 同步；国家币种使用协议默认值（PH / PHP）
+        // 国家币种与套餐默认地区、代理标签保持一致。
         await setProgress('running', 20, '正在提交代充订单...');
         const idempotencyKey = `cdk-${cdk}`;
         const submit = await gptApi.submitPay(cfg, {
             planKey: apiPlanKey,
             session: sessionPayload,
-            country: cfg.country,
-            currency: cfg.currency,
+            country: paymentRegion,
+            currency: paymentCurrency,
             newCard,
             proxy,
             clientRef: `kc-cdk-${cdk}-${jobKey}`,
@@ -3480,6 +3514,12 @@ function spawnActivationWorker({ task, token, sessionRaw, cdk, cdkDetails, clien
         const accountEmail = extractEmailFromSession(sessionRaw) || task.tokenPreview || '';
 
         try {
+            const planType = normalizePlanType(cdkDetails.plan_type);
+            if (!planType) throw new Error(`不支持的套餐类型: ${String(cdkDetails.plan_type)}`);
+            const paymentRegion = getPlanPaymentRegion(planType);
+            const proxy = await store.getActiveProxy(paymentRegion);
+            if (!proxy) throw new Error(`没有启用的 ${paymentRegion} 国家标签代理，请先在代理池设置标签并启用`);
+            paymentProxy = proxy;
             for (let attempt = 1; attempt <= MAX_PROCESS_ATTEMPTS; attempt += 1) {
                 logTask(task.jobKey, `开始第 ${attempt}/${MAX_PROCESS_ATTEMPTS} 次尝试`);
 
@@ -3493,8 +3533,6 @@ function spawnActivationWorker({ task, token, sessionRaw, cdk, cdkDetails, clien
                     cdkCode: cdk
                 });
 
-                const proxy = await store.getActiveProxy();
-                paymentProxy = proxy;
                 const hcaptchaCfg = await store.getHcaptchaConfig();
                 const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
                 const runtimeEnv = {
@@ -3504,11 +3542,12 @@ function spawnActivationWorker({ task, token, sessionRaw, cdk, cdkDetails, clien
                     CHATGPT_TOKEN: token,
                     CHATGPT_SESSION_JSON: String(sessionRaw || '').startsWith('{') ? sessionRaw : '',
                     CDK_CODE: cdk,
-                    CDK_PLAN_TYPE: cdkDetails.plan_type || 'plus',
+                    CDK_PLAN_TYPE: planType,
+                    PAYMENT_REGION_OVERRIDE: paymentRegion,
                     PROXY: proxy
                 };
 
-                logTask(task.jobKey, `尝试 ${attempt} 启动自动化 proxy=${proxy ? 'yes' : 'no'}`);
+                logTask(task.jobKey, `尝试 ${attempt} 启动自动化 plan=${planType} region=${paymentRegion} proxy_label=${paymentRegion} proxy=yes`);
 
                 const run = await spawnWorkerWithBrowser({
                     jobKey: task.jobKey,

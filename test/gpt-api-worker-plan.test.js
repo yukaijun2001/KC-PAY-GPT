@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { resolveProviderPlanKey } = require('../src/integrations/gpt-api-client');
+const { getPlanPaymentRegion, REGION_CONFIG } = require('../src/config/region-config');
 
 function workerFixture(providerPlans) {
     const source = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
@@ -12,7 +13,7 @@ function workerFixture(providerPlans) {
     const store = {
         getGptApiConfig: vi.fn(async () => ({ enabled: true, api_key: 'synthetic', country: 'PH', currency: 'PHP' })),
         updateTaskLog: vi.fn(async () => {}),
-        getActiveProxy: vi.fn(async () => ''),
+        getActiveProxy: vi.fn(async region => `http://${region.toLowerCase()}-proxy.invalid:8080`),
         reserveCard: vi.fn(async () => ({ id: 7, card_number: '4242424242424242', card_expiry: '12/2030', card_cvc: '123' })),
         releaseCard: vi.fn(async () => {}),
         resetCdkFailure: vi.fn(async () => {}),
@@ -30,6 +31,7 @@ function workerFixture(providerPlans) {
     };
     const context = vm.createContext({
         store, gptApi, process: { env: {} }, console: { log() {}, error() {} },
+        getPlanPaymentRegion, REGION_CONFIG,
         logTask: vi.fn(), broadcastToTask: vi.fn(), notifyTaskOutcome: vi.fn(),
         releaseForegroundSlot: vi.fn(), getTotalActiveJobs: () => 0,
         sleep: async () => {}, maskProxyForLog: () => '',
@@ -54,6 +56,12 @@ describe('third-party worker plan selection', () => {
         await run({ task: { jobKey: 'test-job' }, token: 'synthetic', session: { access_token: 'synthetic' }, cdk: 'TEST', planType });
         expect(gptApi.inspectPay.mock.calls[0][1].planKey).toBe(key);
         expect(gptApi.submitPay.mock.calls[0][1].planKey).toBe(key);
+        const region = planType === 'go' ? 'EG' : 'PH';
+        expect(store.getActiveProxy).toHaveBeenCalledExactlyOnceWith(region);
+        expect(gptApi.submitPay.mock.calls[0][1]).toMatchObject({
+            country: region, currency: REGION_CONFIG[region].currency,
+            proxy: `http://${region.toLowerCase()}-proxy.invalid:8080`, newCard: { country: region }
+        });
         expect(store.markCdkUnused).not.toHaveBeenCalled();
     });
 
@@ -63,6 +71,16 @@ describe('third-party worker plan selection', () => {
         expect(gptApi.inspectPay).not.toHaveBeenCalled();
         expect(gptApi.submitPay).not.toHaveBeenCalled();
         expect(store.reserveCard).not.toHaveBeenCalled();
+        expect(store.markCdkUnused).toHaveBeenCalledWith('TEST');
+    });
+
+    it.each(['empty', 'missing'])('does not reserve a card or submit when regional proxy is %s', async mode => {
+        const { run, store, gptApi } = workerFixture(plans);
+        if (mode === 'empty') store.getActiveProxy.mockResolvedValue('');
+        else store.getActiveProxy.mockRejectedValue(new Error('没有启用的埃及标签代理'));
+        await run({ task: { jobKey: 'test-job' }, token: 'fixture', cdk: 'TEST', planType: 'go' });
+        expect(store.reserveCard).not.toHaveBeenCalled();
+        expect(gptApi.submitPay).not.toHaveBeenCalled();
         expect(store.markCdkUnused).toHaveBeenCalledWith('TEST');
     });
 });
