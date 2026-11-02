@@ -70,6 +70,33 @@ describe('gpt api client', () => {
         expect(out.plans).toEqual([{ key: 'plus' }]);
     });
 
+    it('uses the provider key matching the exact requested plan_name', () => {
+        const plans = [
+            { key: 'go-provider', plan_name: 'chatgptgoplan', enabled: 1 },
+            { key: 'plus', plan_name: 'chatgptplusplan', enabled: 1 },
+            { key: 'provider-lite-key', plan_name: 'chatgptprolite', enabled: 1 },
+            { key: 'pro20', plan_name: 'chatgptpro', enabled: true },
+            { key: 'pro50', plan_name: 'chatgptpromax', enabled: '1' }
+        ];
+        expect(client.resolveProviderPlanKey('go', plans)).toBe('go-provider');
+        expect(client.resolveProviderPlanKey('pro_10x', plans)).toBe('provider-lite-key');
+        expect(client.resolveProviderPlanKey('pro_50x', plans)).toBe('pro50');
+    });
+
+    it('refuses unavailable or ambiguous provider plans rather than falling back to Plus', () => {
+        const unavailable = [
+            { key: 'plus', plan_name: 'chatgptplusplan', enabled: 1 },
+            { key: 'go', plan_name: 'chatgptgoplan', enabled: 0 }
+        ];
+        expect(() => client.resolveProviderPlanKey('go', unavailable)).toThrow('chatgptgoplan');
+        expect(() => client.resolveProviderPlanKey('pro_50x', unavailable)).toThrow('chatgptpromax');
+        expect(() => client.resolveProviderPlanKey('unknown', unavailable)).toThrow('不支持');
+        expect(() => client.resolveProviderPlanKey('plus', [
+            { key: 'a', plan_name: 'chatgptplusplan', enabled: 1 },
+            { key: 'b', plan_name: 'chatgptplusplan', enabled: 1 }
+        ])).toThrow('多个');
+    });
+
     it('uses the business result status instead of queue done', () => {
         expect(client.extractStatus({ status: 'done', result: { ok: false, status: 'failed', error: 'cf_challenge_unresolved' } })).toBe('failed');
         expect(client.extractStatus({ status: 'done', result: { ok: true, status: 'success' } })).toBe('success');

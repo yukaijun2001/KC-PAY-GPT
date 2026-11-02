@@ -13,10 +13,16 @@ describe('UI Checkout plan/region guard', () => {
         }, { planType: 'plus', region: 'PH' })).toBe('');
     });
 
-    it('never silently turns Pro 5x into Pro 20x', () => {
+    it('never silently turns Pro 10X into Pro 20X', () => {
         expect(validateUiCheckoutPayload({
             plan_name: 'chatgptpro', billing_details: { country: 'PH', currency: 'PHP' }
-        }, { planType: 'pro_5x', region: 'PH' })).toContain('chatgptprolite');
+        }, { planType: 'pro_10x', region: 'PH' })).toContain('chatgptprolite');
+    });
+
+    it('never silently turns Pro 50X into Pro 20X', () => {
+        expect(validateUiCheckoutPayload({
+            plan_name: 'chatgptpro', billing_details: { country: 'PH', currency: 'PHP' }
+        }, { planType: 'pro_50x', region: 'PH' })).toContain('chatgptpromax');
     });
 
     it('preserves an explicitly overridden plan', () => {
@@ -33,6 +39,42 @@ describe('UI Checkout plan/region guard', () => {
 
     it('waits for asynchronous error details before reporting failure', async () => {
         await expect(waitForCheckoutPage({}, 1000, async () => 'upstream detail')).rejects.toThrow('upstream detail');
+    });
+});
+
+describe('UI plan button selection', () => {
+    it.each([
+        ['go', 'Upgrade to Go'],
+        ['pro_10x', 'Upgrade to Pro 10X'],
+        ['pro_20x', 'Upgrade to Pro 20X'],
+        ['pro_50x', 'Upgrade to Pro 50X']
+    ])('selects the exact %s button before generic Pro', async (planType, expected) => {
+        const filename = path.join(__dirname, '../src/checkout/pricing-checkout.js');
+        const realRequire = createRequire(filename);
+        const module = { exports: {} };
+        const context = vm.createContext({
+            module, console, setTimeout, clearTimeout,
+            require: (name) => name === '../browser/session-auth'
+                ? { assertChatGptLoggedIn: async () => {} }
+                : realRequire(name)
+        });
+        vm.runInContext(fs.readFileSync(filename, 'utf8'), context);
+        context.switchToPersonalPlans = async () => {};
+        const buttonNames = ['Upgrade to Pro 20X', 'Upgrade to Go', 'Upgrade to Pro 10X', 'Upgrade to Pro 50X'];
+        const clicked = [];
+        const page = {
+            waitForTimeout: async () => {},
+            getByRole: (_, { name }) => {
+                const match = buttonNames.find((label) => name.test(label));
+                const locator = {
+                    first: () => locator, isVisible: async () => Boolean(match),
+                    scrollIntoViewIfNeeded: async () => {}, click: async () => { clicked.push(match); }
+                };
+                return locator;
+            }
+        };
+        await context.module.exports.clickPlanUpgrade(page, planType);
+        expect(clicked).toEqual([expected]);
     });
 });
 
@@ -98,7 +140,7 @@ describe('UI Checkout request guard integration', () => {
 
     it('aborts a mismatched Pro request before it reaches the server', async () => {
         const run = fixture({ sentPlan: 'chatgptpro' });
-        await expect(run.open(run.page, { planType: 'pro_5x', region: 'PH' })).rejects.toThrow('chatgptprolite');
+        await expect(run.open(run.page, { planType: 'pro_10x', region: 'PH' })).rejects.toThrow('chatgptprolite');
         expect(run.route.abort).toHaveBeenCalledOnce();
         expect(run.route.fallback).not.toHaveBeenCalled();
         expect(run.page.unroute).toHaveBeenCalledOnce();

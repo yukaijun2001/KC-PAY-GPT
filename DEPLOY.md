@@ -64,6 +64,26 @@ docker compose logs --tail=80 app
 
 此操作不重建 MySQL，也不删除数据卷。保留原有 `.env`、`data/`、`debug_screenshots/` 和 `product_files/`；不要执行数据库重置脚本。MySQL 初始化文件继续使用根目录的 `mysql-schema.sql`，兼容已有挂载。
 
+#### 一键重新部署
+
+在服务器的 Git 项目根目录执行：
+
+```bash
+cd /opt/KC-PAY-GPT
+sudo bash ./deploy.sh
+```
+
+脚本要求 Git、Python 3、Docker 和 Docker Compose 已安装，当前分支默认为 `main`，并配置了 `origin` 远程。执行过程：
+
+1. 获取远端最新提交，并在临时目录构建新应用镜像；构建期间旧服务继续运行。
+2. 停止并移除**当前 Compose 项目**的容器，移除未被其他容器使用的旧应用镜像；共享 MySQL 镜像不主动删除。
+3. 将代码切换到远端提交，启动新容器并等待应用健康检查。`.env`、MySQL 数据卷、`data/`、`debug_screenshots/` 和 `product_files/` 不会被清空。
+4. 本地未提交的非忽略文件会先备份到 Git stash，不会自动应用到新代码；旧提交另有备份引用。切换后若启动失败，脚本会尝试恢复原代码、原镜像及原服务。
+
+如果新旧 MySQL 数据卷、镜像配置或数据库连接环境不一致，脚本会在停止服务前退出，避免误连或升级现有数据库。为避免忽略自定义配置，脚本暂不支持 Compose override 文件或自定义 `COMPOSE_FILE`。脚本不会创建或覆盖 `.env`，也不会把它复制进临时构建目录；如果缺少它，请先按实际部署配置。可选变量：`DEPLOY_REMOTE`（默认 `origin`）、`DEPLOY_BRANCH`（默认 `main`，须与当前分支一致）、`DEPLOY_HEALTH_TIMEOUT`（默认 240 秒）。
+
+需要验证脚本时，可运行 `bash test/deploy-docker-smoke.sh`；它使用独立的临时 Compose 项目和 MySQL 测试卷，并在完成后清理，不操作现有项目的数据卷。
+
 ### 4. 常用命令
 
 ```bash

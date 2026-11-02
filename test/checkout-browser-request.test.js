@@ -44,6 +44,28 @@ function syntheticTokenWithAccountId(accountId) {
 describe('browser Checkout API', () => {
     afterEach(() => vi.unstubAllEnvs());
 
+    it.each([
+        ['go', 'chatgptgoplan'],
+        ['plus', 'chatgptplusplan'],
+        ['pro_10x', 'chatgptprolite'],
+        ['pro_20x', 'chatgptpro'],
+        ['pro_50x', 'chatgptpromax']
+    ])('sends the requested %s plan name', async (planType, expectedPlanName) => {
+        const run = browserPage();
+        await openApiCheckout(run.page, { ...checkoutOptions, planType });
+        expect(JSON.parse(run.fetch.mock.calls[0][1].body).plan_name).toBe(expectedPlanName);
+    });
+
+    it('rejects removed or unknown plan types even with a plan name override', async () => {
+        for (const planType of ['pro_5x', 'unknown']) {
+            const run = browserPage();
+            await expect(openApiCheckout(run.page, {
+                ...checkoutOptions, planType, planNameOverride: 'chatgptplusplan'
+            })).rejects.toThrow('不支持的套餐类型');
+            expect(run.fetch).not.toHaveBeenCalled();
+        }
+    });
+
     it('gets a fresh SDK token and creates Checkout in the same browser/session', async () => {
         const run = browserPage();
         const result = await openApiCheckout(run.page, checkoutOptions);

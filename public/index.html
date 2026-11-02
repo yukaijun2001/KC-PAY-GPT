@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ChatGPT 订阅自动开通 | KC ChatGPT PLUS</title>
+    <title>ChatGPT 订阅自动开通 | KC GPT</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -16,7 +16,7 @@
         <header class="site-hero">
             <div class="hero-eyebrow">Instant AI Top-Ups</div>
             <h1>ChatGPT 订阅自动开通</h1>
-            <p class="hero-subtitle">通过官方 Checkout 流程自助开通 KC ChatGPT PLUS，兑换卡密后粘贴 Session 即可自动完成支付开通。</p>
+            <p class="hero-subtitle">通过官方 Checkout 流程自助开通 ChatGPT 订阅，兑换卡密后粘贴 Session 即可继续。</p>
             <div class="feature-badges">
                 <span class="feature-badge"><i data-lucide="shield-check"></i> 官方结账</span>
                 <span class="feature-badge"><i data-lucide="zap"></i> 极速开通</span>
@@ -25,31 +25,43 @@
             </div>
         </header>
 
-        <section class="plan-showcase">
-            <article class="plan-card">
+        <section class="plan-showcase" aria-label="支持的订阅套餐">
+            <article class="plan-card" data-plan-type="go">
+                <div class="plan-card-head">
+                    <h3>ChatGPT Go</h3>
+                    <span class="plan-tag">Go</span>
+                </div>
+                <p>使用 Go 套餐卡密开通；实际权益和可用性以订阅页面为准。</p>
+            </article>
+            <article class="plan-card" data-plan-type="plus">
                 <div class="plan-card-head">
                     <h3>ChatGPT Plus</h3>
                     <span class="plan-tag">标准版</span>
                 </div>
-                <p>适合日常使用：GPT-5.5、高级数据分析、DALL·E 等 Plus 权益，按月订阅。</p>
+                <p>使用 Plus 套餐卡密开通；实际权益和可用性以订阅页面为准。</p>
             </article>
-            <article class="plan-card highlight">
+            <article class="plan-card highlight" data-plan-type="pro_10x">
                 <div class="plan-card-head">
-                    <h3>Pro 5x</h3>
-                    <span class="plan-tag pro">高用量</span>
+                    <h3>ChatGPT Pro 10X</h3>
+                    <span class="plan-tag pro">Pro</span>
                 </div>
-                <p>在 Pro 基础上提供约 <strong>5 倍</strong> 的消息/推理额度，适合重度个人用户与创作者。</p>
+                <p>使用 Pro 10X 套餐卡密开通；实际权益以订阅页面为准。</p>
             </article>
-            <article class="plan-card">
+            <article class="plan-card" data-plan-type="pro_20x">
                 <div class="plan-card-head">
-                    <h3>Pro 20x</h3>
-                    <span class="plan-tag pro">旗舰</span>
+                    <h3>ChatGPT Pro 20X</h3>
+                    <span class="plan-tag pro">Pro</span>
                 </div>
-                <p>最高约 <strong>20 倍</strong> Pro 用量上限，适合团队主力账号、开发测试与高并发场景。</p>
+                <p>使用 Pro 20X 套餐卡密开通；实际权益以订阅页面为准。</p>
+            </article>
+            <article class="plan-card" data-plan-type="pro_50x">
+                <div class="plan-card-head">
+                    <h3>ChatGPT Pro 50X</h3>
+                    <span class="plan-tag pro">Pro</span>
+                </div>
+                <p>使用 Pro 50X 套餐卡密开通；实际权益以订阅页面为准。</p>
             </article>
         </section>
-        <p id="paymentRegionHint" class="region-hint">当前账单地区：菲律宾，结算币种：PHP</p>
-
         <main class="recharge-card">
             <div class="card-head">
                 <div>
@@ -71,11 +83,6 @@
                 </div>
             </div>
 
-            <div class="notice-banner">
-                <i data-lucide="info"></i>
-                <p>ChatGPT Plus 自助开通：提交后系统将自动打开官方 Checkout 页面并完成订阅开通，无需提供账号密码。一卡一充，3-5分钟开通完毕，如遇到卡住，请联系客服进行处理。</p>
-            </div>
-
             <nav class="tab-nav">
                 <button class="tab-btn active" data-tab="redeem">兑换开通</button>
                 <button class="tab-btn" data-tab="query">查询状态</button>
@@ -83,7 +90,7 @@
 
             <div id="redeemSection">
                 <div id="step1">
-                    <label class="field-label" for="cdkInput">输入您的 Plus 充值码</label>
+                    <label class="field-label" for="cdkInput">输入您的订阅充值码</label>
                     <section class="input-group">
                         <input type="text" id="cdkInput" placeholder="请输入卡密 / CDK" maxlength="32">
                         <button id="redeemBtn" class="btn-primary"><span class="btn-text">兑换卡密</span>
@@ -143,14 +150,6 @@
             </ul>
         </details>
 
-        <aside id="publicRuntimeCard" class="public-runtime-panel load-low">
-            <div class="public-runtime-layout">
-                <div class="public-runtime-title">前台并发</div>
-                <div id="publicForegroundSlots" class="public-runtime-value">0/0</div>
-                <div id="publicForegroundSlotsMeta" class="public-runtime-meta">当前空闲</div>
-                <div id="publicForegroundSlotGrid" class="public-slot-grid"></div>
-            </div>
-        </aside>
     </div>
 
     <script>
@@ -170,21 +169,17 @@
         const taskProgressBar = document.getElementById('taskProgressBar');
         const taskProgressPercent = document.getElementById('taskProgressPercent');
         const taskProgressText = document.getElementById('taskProgressText');
-        const publicRuntimeCard = document.getElementById('publicRuntimeCard');
-        const publicForegroundSlots = document.getElementById('publicForegroundSlots');
-        const publicForegroundSlotGrid = document.getElementById('publicForegroundSlotGrid');
-        const publicForegroundSlotsMeta = document.getElementById('publicForegroundSlotsMeta');
         const flowStatusBadge = document.getElementById('flowStatusBadge');
         const flowStepper = document.getElementById('flowStepper');
         const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
         let taskProgressValue = 0;
         let activationLocked = false;
-        let publicRuntimeTimer = null;
-
         const PLAN_LABELS = {
+            go: 'ChatGPT Go',
             plus: 'ChatGPT Plus',
-            pro_5x: 'ChatGPT Pro 5x',
-            pro_20x: 'ChatGPT Pro 20x'
+            pro_10x: 'ChatGPT Pro 10X',
+            pro_20x: 'ChatGPT Pro 20X',
+            pro_50x: 'ChatGPT Pro 50X'
         };
 
         function updateFlowUI(step, status = 'pending') {
@@ -474,10 +469,11 @@
                     }
                     const planDiv = document.getElementById('redeemPlanInfo');
                     const planType = data.data?.plan_type || 'plus';
-                    const planLabel = data.data?.plan_label || PLAN_LABELS[planType] || PLAN_LABELS.plus;
+                    const planLabel = data.data?.plan_label || PLAN_LABELS[planType] || `未知套餐 (${planType})`;
                     if (planDiv) {
                         planDiv.style.display = 'block';
-                        planDiv.innerHTML = `<span>套餐类型</span><strong>${planLabel}</strong>`;
+                        planDiv.innerHTML = '<span>套餐类型</span><strong></strong>';
+                        planDiv.querySelector('strong').textContent = planLabel;
                     }
                     statusMsg.style.display = 'none';
                 } else {
@@ -803,68 +799,7 @@
             statusMsg.style.display = 'block';
         }
 
-        function renderPublicSlotGrid(active, max) {
-            if (!publicRuntimeCard || !publicForegroundSlotGrid || !publicForegroundSlotsMeta) {
-                return;
-            }
-
-            const safeMax = Math.max(1, Number(max) || 1);
-            const safeActive = Math.max(0, Math.min(safeMax, Number(active) || 0));
-            const usageRate = safeMax > 0 ? (safeActive / safeMax) : 0;
-            let loadClass = 'load-low';
-            let loadText = '当前空闲';
-
-            if (usageRate >= 0.8) {
-                loadClass = 'load-high';
-                loadText = '并发占用较高';
-            } else if (usageRate >= 0.6) {
-                loadClass = 'load-mid';
-                loadText = '并发占用过半';
-            } else if (safeActive > 0) {
-                loadText = '运行中';
-            }
-
-            publicRuntimeCard.classList.remove('load-low', 'load-mid', 'load-high');
-            publicRuntimeCard.classList.add(loadClass);
-            publicForegroundSlotsMeta.textContent = loadText;
-            publicForegroundSlotGrid.innerHTML = Array.from({ length: safeMax }, (_, index) => {
-                const occupied = index < safeActive;
-                return `<div class="public-slot-box ${occupied ? 'occupied' : 'idle'}"></div>`;
-            }).join('');
-        }
-
-        async function loadPublicRuntime() {
-            try {
-                const response = await fetch('/api/public/runtime');
-                const data = await response.json();
-                if (!data.success) {
-                    return;
-                }
-                const active = Number(data.runtime?.active_foreground_jobs || 0);
-                const max = Number(data.runtime?.max_foreground_jobs || 1);
-                if (publicForegroundSlots) {
-                    publicForegroundSlots.textContent = `${active}/${max}`;
-                }
-                renderPublicSlotGrid(active, max);
-            } catch (_) { }
-        }
-
-        async function loadPaymentRegionHint() {
-            const hint = document.getElementById('paymentRegionHint');
-            if (!hint) return;
-            try {
-                const res = await fetch('/api/public/payment-region');
-                const data = await res.json();
-                if (data.success) {
-                    hint.textContent = `当前账单地区：${data.label || data.region}，结算币种：${data.currency || 'USD'}`;
-                }
-            } catch (_) { }
-        }
-
         updateFlowUI(1, 'pending');
-        loadPaymentRegionHint();
-        loadPublicRuntime();
-        publicRuntimeTimer = setInterval(loadPublicRuntime, 3000);
         lucide.createIcons();
     </script>
 </body>

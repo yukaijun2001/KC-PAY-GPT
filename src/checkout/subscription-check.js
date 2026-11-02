@@ -1,6 +1,7 @@
 'use strict';
 
 const axios = require('axios');
+const { ProxyAgent } = require('proxy-agent');
 const { request: playwrightRequest } = require('playwright');
 const { extractProfileFromToken } = require('../browser/session-auth');
 const { preparePlaywrightProxy } = require('../browser/playwright-proxy');
@@ -12,6 +13,7 @@ const BILLING_PAGE_URL = 'https://chatgpt.com/account/manage';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';
 
 const PLAN_LABELS = {
+    go: 'ChatGPT Go',
     plus: 'ChatGPT Plus',
     pro: 'ChatGPT Pro',
     team: 'ChatGPT Team',
@@ -37,6 +39,9 @@ function normalizeSubscriptionPlan(subPlan, hasActive) {
     }
     if (raw.includes('team')) {
         return 'team';
+    }
+    if (raw === 'go' || raw === 'chatgptgoplan') {
+        return 'go';
     }
     if (raw.includes('pro') && !raw.includes('plus')) {
         return 'pro';
@@ -278,17 +283,17 @@ function isCloudflareBlock(status, data) {
     return /cloudflare|cf-ray|attention required|just a moment|cf_chl/i.test(text);
 }
 
-async function fetchAccountCheckWithPlaywright(accessToken, timezoneOffsetMin = 0) {
+async function fetchAccountCheckWithPlaywright(accessToken, timezoneOffsetMin = 0, options = {}) {
     const url = buildCheckUrl(timezoneOffsetMin);
-    const proxyValue = String(process.env.PROXY || '').trim();
+    const proxyValue = String(options.proxy ?? process.env.PROXY ?? '').trim();
     const { proxyConfig, cleanup } = await preparePlaywrightProxy(proxyValue);
-    const ctx = await playwrightRequest.newContext({
-        userAgent: USER_AGENT,
-        proxy: proxyConfig || undefined,
-        extraHTTPHeaders: buildCheckHeaders(accessToken)
-    });
-
+    let ctx;
     try {
+        ctx = await playwrightRequest.newContext({
+            userAgent: USER_AGENT,
+            proxy: proxyConfig || undefined,
+            extraHTTPHeaders: buildCheckHeaders(accessToken)
+        });
         const response = await ctx.get(url, { timeout: 20000 });
         const status = response.status();
         let data;
@@ -299,26 +304,34 @@ async function fetchAccountCheckWithPlaywright(accessToken, timezoneOffsetMin = 
         }
         return { status, data, via: 'playwright' };
     } finally {
-        await ctx.dispose().catch(() => {});
+        if (ctx) await ctx.dispose().catch(() => {});
         await cleanup().catch(() => {});
     }
 }
 
-async function fetchAccountCheckWithAxios(accessToken, timezoneOffsetMin = 0) {
+async function fetchAccountCheckWithAxios(accessToken, timezoneOffsetMin = 0, options = {}) {
     const url = buildCheckUrl(timezoneOffsetMin);
-    const response = await axios.get(url, {
-        headers: buildCheckHeaders(accessToken),
-        timeout: 20000,
-        validateStatus: () => true
-    });
-    return { status: response.status, data: response.data, via: 'axios' };
+    const proxyValue = String(options.proxy ?? process.env.PROXY ?? '').trim();
+    const agent = proxyValue ? new ProxyAgent({ getProxyForUrl: () => proxyValue }) : null;
+    try {
+        const response = await axios.get(url, {
+            headers: buildCheckHeaders(accessToken),
+            timeout: 20000,
+            validateStatus: () => true,
+            ...(agent ? { httpAgent: agent, httpsAgent: agent, proxy: false }
+                : (options.proxy != null ? { proxy: false } : {}))
+        });
+        return { status: response.status, data: response.data, via: 'axios' };
+    } finally {
+        if (agent) agent.destroy();
+    }
 }
 
-async function fetchAccountCheck(accessToken, timezoneOffsetMin = 0) {
+async function fetchAccountCheck(accessToken, timezoneOffsetMin = 0, options = {}) {
     let lastError = null;
 
     try {
-        const playwrightResult = await fetchAccountCheckWithPlaywright(accessToken, timezoneOffsetMin);
+        const playwrightResult = await fetchAccountCheckWithPlaywright(accessToken, timezoneOffsetMin, options);
         if (playwrightResult.status === 200 || playwrightResult.status === 401) {
             return playwrightResult;
         }
@@ -328,7 +341,7 @@ async function fetchAccountCheck(accessToken, timezoneOffsetMin = 0) {
     }
 
     try {
-        const axiosResult = await fetchAccountCheckWithAxios(accessToken, timezoneOffsetMin);
+        const axiosResult = await fetchAccountCheckWithAxios(accessToken, timezoneOffsetMin, options);
         if (axiosResult.status === 200 || axiosResult.status === 401) {
             return axiosResult;
         }
@@ -344,19 +357,20 @@ async function fetchAccountCheck(accessToken, timezoneOffsetMin = 0) {
     return lastError || { status: 502, data: 'unknown error', via: 'none' };
 }
 
-async function requestOpenAiJson(accessToken, { method = 'GET', url, body = null }) {
+async function requestOpenAiJson(accessToken, { method = 'GET', url, body = null, proxy }) {
     const headers = buildCheckHeaders(accessToken);
-    const proxyValue = String(process.env.PROXY || '').trim();
+    const proxyValue = String(proxy ?? process.env.PROXY ?? '').trim();
     let lastError = null;
 
     try {
         const { proxyConfig, cleanup } = await preparePlaywrightProxy(proxyValue);
-        const ctx = await playwrightRequest.newContext({
-            userAgent: USER_AGENT,
-            proxy: proxyConfig || undefined,
-            extraHTTPHeaders: headers
-        });
+        let ctx;
         try {
+            ctx = await playwrightRequest.newContext({
+                userAgent: USER_AGENT,
+                proxy: proxyConfig || undefined,
+                extraHTTPHeaders: headers
+            });
             const response = await ctx.fetch(url, {
                 method,
                 timeout: 20000,
@@ -375,21 +389,25 @@ async function requestOpenAiJson(accessToken, { method = 'GET', url, body = null
             }
             lastError = { status, data, via: 'playwright' };
         } finally {
-            await ctx.dispose().catch(() => {});
+            if (ctx) await ctx.dispose().catch(() => {});
             await cleanup().catch(() => {});
         }
     } catch (error) {
         lastError = { status: 0, data: error.message, via: 'playwright', error };
     }
 
+    let agent;
     try {
+        agent = proxyValue ? new ProxyAgent({ getProxyForUrl: () => proxyValue }) : null;
         const response = await axios({
             method,
             url,
             headers: body != null ? { ...headers, 'Content-Type': 'application/json' } : headers,
             data: body != null ? body : undefined,
             timeout: 20000,
-            validateStatus: () => true
+            validateStatus: () => true,
+            ...(agent ? { httpAgent: agent, httpsAgent: agent, proxy: false }
+                : (proxy != null ? { proxy: false } : {}))
         });
         if (response.status >= 200 && response.status < 300 || response.status === 401) {
             return { status: response.status, data: response.data, via: 'axios' };
@@ -401,6 +419,8 @@ async function requestOpenAiJson(accessToken, { method = 'GET', url, body = null
         if (!lastError) {
             lastError = { status: 0, data: error.message, via: 'axios', error };
         }
+    } finally {
+        if (agent) agent.destroy();
     }
 
     return lastError || { status: 502, data: 'unknown error', via: 'none' };
@@ -428,6 +448,7 @@ async function cancelAutoRenew(accessToken, options = {}) {
 
     const checkResult = await querySubscriptionBySession(token, {
         timezoneOffsetMin: options.timezoneOffsetMin,
+        proxy: options.proxy,
         email: options.email || profile.email || ''
     });
     if (!checkResult.ok) {
@@ -463,7 +484,8 @@ async function cancelAutoRenew(accessToken, options = {}) {
         response = await requestOpenAiJson(token, {
             method: 'POST',
             url: CANCEL_SUBSCRIPTION_URL,
-            body: { account_id: accountId }
+            body: { account_id: accountId },
+            proxy: options.proxy
         });
     } catch (error) {
         return {
@@ -494,6 +516,7 @@ async function cancelAutoRenew(accessToken, options = {}) {
 
     const verify = await querySubscriptionBySession(token, {
         timezoneOffsetMin: options.timezoneOffsetMin,
+        proxy: options.proxy,
         email: options.email || profile.email || ''
     });
 
@@ -652,7 +675,7 @@ async function querySubscriptionBySession(accessToken, options = {}) {
 
     let response;
     try {
-        response = await fetchAccountCheck(token, options.timezoneOffsetMin);
+        response = await fetchAccountCheck(token, options.timezoneOffsetMin, options);
     } catch (error) {
         return {
             ok: false,

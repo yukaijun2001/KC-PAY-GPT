@@ -3,6 +3,7 @@ const { openPricingCheckout } = require('./src/checkout/pricing-checkout');
 const { openApiCheckout } = require('./src/checkout/chatgpt');
 const store = require('./src/persistence/mysql-store');
 const { getRegionConfig, getRegionBrowserProfile } = require('./src/config/region-config');
+const { normalizePlanType } = require('./src/config/plans');
 const { installChatGptSession, bootstrapChatGptSession } = require('./src/browser/session-auth');
 const { connectTaskBrowser, applyCdpEnv, closeTaskBrowser } = require('./src/browser/browser-runtime');
 const { preparePlaywrightProxy } = require('./src/browser/playwright-proxy');
@@ -505,6 +506,9 @@ async function run() {
         if (!planType) {
             planType = 'plus';
         }
+        const normalizedPlanType = normalizePlanType(planType);
+        if (!normalizedPlanType) throw new Error(`不支持的套餐类型: ${String(planType)}`);
+        planType = normalizedPlanType;
 
         // Resolve region and currency (与浏览器 profile 一致)
         const billingCountry = paymentRegion;

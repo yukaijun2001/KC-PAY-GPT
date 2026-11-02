@@ -2632,9 +2632,11 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                     <div class="form-group" style="margin-bottom: 0;">
                         <label style="margin-bottom: 6px;">套餐类型</label>
                         <select id="checkout_plan_type" class="asset-input" onchange="syncCheckoutPlanName()">
-                            <option value="plus">Plus — chatgptplusplan</option>
-                            <option value="pro_5x">Pro 5x — chatgptprolite</option>
-                            <option value="pro_20x">Pro 20x — chatgptpro</option>
+                            <option value="go">Go — chatgptgoplan</option>
+                            <option value="plus" selected>Plus — chatgptplusplan</option>
+                            <option value="pro_10x">Pro 10X — chatgptprolite</option>
+                            <option value="pro_20x">Pro 20X — chatgptpro</option>
+                            <option value="pro_50x">Pro 50X — chatgptpromax</option>
                         </select>
                     </div>
                     <div class="form-group" style="margin-bottom: 0;">
@@ -2803,9 +2805,11 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                         <input type="text" id="cdk_search" class="asset-input" placeholder="搜索激活码 / 卡密"
                             style="width: 220px;" oninput="handleCdkSearch(this.value)">
                         <select id="cdk_plan_type" class="asset-input" style="width: 130px;">
+                            <option value="go">Go</option>
                             <option value="plus" selected>Plus</option>
-                            <option value="pro_5x">Pro 5x</option>
-                            <option value="pro_20x">Pro 20x</option>
+                            <option value="pro_10x">Pro 10X</option>
+                            <option value="pro_20x">Pro 20X</option>
+                            <option value="pro_50x">Pro 50X</option>
                         </select>
                         <input type="number" id="cdk_count" value="1" min="1" max="100" class="asset-input"
                             style="width: 80px;">
@@ -2849,9 +2853,11 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                                 data-lucide="chevron-down"></i></button>
                         <div id="filter_menu_cdk_plan_type_filter" class="filter-menu">
                             <button class="filter-option active" onclick="selectCdkPlanTypeFilter('all', '全部套餐')">全部套餐</button>
+                            <button class="filter-option" onclick="selectCdkPlanTypeFilter('go', 'Go')">Go</button>
                             <button class="filter-option" onclick="selectCdkPlanTypeFilter('plus', 'Plus')">Plus</button>
-                            <button class="filter-option" onclick="selectCdkPlanTypeFilter('pro_5x', 'Pro 5x')">Pro 5x</button>
-                            <button class="filter-option" onclick="selectCdkPlanTypeFilter('pro_20x', 'Pro 20x')">Pro 20x</button>
+                            <button class="filter-option" onclick="selectCdkPlanTypeFilter('pro_10x', 'Pro 10X')">Pro 10X</button>
+                            <button class="filter-option" onclick="selectCdkPlanTypeFilter('pro_20x', 'Pro 20X')">Pro 20X</button>
+                            <button class="filter-option" onclick="selectCdkPlanTypeFilter('pro_50x', 'Pro 50X')">Pro 50X</button>
                         </div>
                     </div>
                     <button class="btn btn-success" onclick="togglePageSelection('cdk')">
@@ -3098,9 +3104,11 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                         <label>套餐类型</label>
                         <select id="billing_plan_type" class="asset-input">
                             <option value="">全部</option>
+                            <option value="go">Go</option>
                             <option value="plus">Plus</option>
-                            <option value="pro_5x">Pro 5x</option>
-                            <option value="pro_20x">Pro 20x</option>
+                            <option value="pro_10x">Pro 10X</option>
+                            <option value="pro_20x">Pro 20X</option>
+                            <option value="pro_50x">Pro 50X</option>
                         </select>
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
@@ -3220,6 +3228,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
 
     <script>
         const TOKEN_KEY = 'plus_admin_token';
+        const ADMIN_PLAN_LABELS = { go: 'Go', plus: 'Plus', pro_10x: 'Pro 10X', pro_20x: 'Pro 20X', pro_50x: 'Pro 50X' };
         let adminLoginPath = '/admin-login';
         const BUSINESS_PAGES = new Set(['checkout_debug', 'cards', 'cdks', 'sessions', 'billing']);
         const ADMIN_LOGIN_EVENT_LABELS = {
@@ -6010,15 +6019,15 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                 const usedAt = typeof cdk === 'string' ? null : cdk.used_at;
                 const sessionPreview = typeof cdk === 'string' ? null : (cdk.session_preview || null);
 
-                const planTypeLabel = { plus: 'Plus', pro_5x: 'Pro 5x', pro_20x: 'Pro 20x' }[planType] || 'Plus';
-                const planTypeColor = { plus: '#2563eb', pro_5x: '#8b5cf6', pro_20x: '#ec4899' }[planType] || '#2563eb';
-                const planTypeBg = { plus: 'rgba(37, 99, 235, 0.12)', pro_5x: 'rgba(139, 92, 246, 0.12)', pro_20x: 'rgba(236, 72, 153, 0.12)' }[planType] || 'rgba(37, 99, 235, 0.12)';
+                const planTypeLabel = ADMIN_PLAN_LABELS[planType] || planType;
+                const planTypeColor = { go: '#059669', plus: '#2563eb', pro_10x: '#8b5cf6', pro_20x: '#ec4899', pro_50x: '#d97706' }[planType] || '#64748b';
+                const planTypeBg = { go: 'rgba(5, 150, 105, 0.12)', plus: 'rgba(37, 99, 235, 0.12)', pro_10x: 'rgba(139, 92, 246, 0.12)', pro_20x: 'rgba(236, 72, 153, 0.12)', pro_50x: 'rgba(217, 119, 6, 0.12)' }[planType] || 'rgba(100, 116, 139, 0.12)';
 
                 return `
                 <tr>
                     <td class="select-cell"><input type="checkbox" ${selectedItems.cdk.has(code) ? 'checked' : ''} onchange="toggleSelection('cdk', '${code}', this.checked)"></td>
                     <td><span class="cdk-copy" onclick="copyCDK('${code}')"><code>${code}</code><i data-lucide="copy"></i></span></td>
-                    <td style="text-align:center"><span class="status-badge" style="background: ${planTypeBg}; color: ${planTypeColor}">${planTypeLabel}</span></td>
+                    <td style="text-align:center"><span class="status-badge" style="background: ${planTypeBg}; color: ${planTypeColor}">${escapeHtml(planTypeLabel)}</span></td>
                     <td><code>${sessionPreview ? escapeHtml(sessionPreview) : '-'}</code></td>
                     <td style="text-align:center"><span class="readonly-switch ${shipped ? 'active' : ''}" title="${shipped ? '已出库' : '未出库'}"></span></td>
                     <td>${status === 'processing'
@@ -7427,12 +7436,11 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                 tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:var(--text-dim); padding:32px;">暂无账单记录</td></tr>`;
                 return;
             }
-            const planLabels = { plus: 'Plus', pro_5x: 'Pro 5x', pro_20x: 'Pro 20x' };
             tbody.innerHTML = records.map(r => {
                 const time = r.payment_time ? new Date(r.payment_time).toLocaleString('zh-CN') : '-';
                 const statusClass = r.status === 'success' ? 'status-success' : 'status-failed';
                 const statusText = r.status === 'success' ? '成功' : '失败';
-                const planLabel = planLabels[r.plan_type] || r.plan_type || '-';
+                const planLabel = ADMIN_PLAN_LABELS[r.plan_type] || r.plan_type || '-';
                 const cardDisplay = escapeHtml(r.card_number || r.card_last4 || '-');
                 const cardSummaryKey = escapeHtml(r.card_last4 || (r.card_number ? String(r.card_number).slice(-4) : ''));
                 return `<tr>
@@ -7675,7 +7683,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
         // ─── Region & Address Management ───────────────────────────────────────────
         let regionAddressList = [];
         let currentRegion = 'PH';
-        let checkoutPlanMap = { plus: 'chatgptplusplan', pro_5x: 'chatgptprolite', pro_20x: 'chatgptpro' };
+        let checkoutPlanMap = { go: 'chatgptgoplan', plus: 'chatgptplusplan', pro_10x: 'chatgptprolite', pro_20x: 'chatgptpro', pro_50x: 'chatgptpromax' };
         let checkoutDebugJobKey = '';
         let checkoutDebugLogAfter = 0;
         let checkoutDebugLogText = '';
@@ -7932,11 +7940,10 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
         function renderCheckoutPlanTypeOptions() {
             const sel = document.getElementById('checkout_plan_type');
             if (!sel) return;
-            const labels = { plus: 'Plus', pro_5x: 'Pro 5x', pro_20x: 'Pro 20x' };
             const current = sel.value || 'plus';
             sel.innerHTML = Object.keys(checkoutPlanMap).map((key) => {
                 const name = checkoutPlanMap[key] || checkoutPlanMap.plus;
-                return `<option value="${escapeHtml(key)}">${escapeHtml(labels[key] || key)} — ${escapeHtml(name)}</option>`;
+                return `<option value="${escapeHtml(key)}">${escapeHtml(ADMIN_PLAN_LABELS[key] || key)} — ${escapeHtml(name)}</option>`;
             }).join('');
             sel.value = checkoutPlanMap[current] ? current : 'plus';
             syncCheckoutPlanName();

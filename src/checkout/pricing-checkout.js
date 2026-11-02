@@ -1,6 +1,7 @@
 'use strict';
 
 const { getRegionConfig } = require('../config/region-config');
+const { normalizePlanType } = require('../config/plans');
 const { assertChatGptLoggedIn } = require('../browser/session-auth');
 const { clearHumanVerification } = require('../captcha/human-verification');
 const { resolvePlanName } = require('../persistence/mysql-store');
@@ -44,10 +45,20 @@ const REGION_CURRENT_COUNTRY_HINTS = {
 
 const SKIP_REGION_BUTTON_TEXT = /^(Upgrade|Personal|Business|Free|Plus|Pro|Subscribe|Close|Your current plan|升级|订阅|关闭)$/i;
 
+function proUpgradePatterns(multiplier) {
+    return [
+        new RegExp(`升级(?:至|到)\\s*(?:ChatGPT\\s*)?Pro\\s*${multiplier}\\s*x\\b`, 'i'),
+        new RegExp(`(?:Upgrade to|Get|Subscribe to)\\s*(?:ChatGPT\\s*)?Pro\\s*${multiplier}\\s*x\\b`, 'i'),
+        /升级至\s*Pro/i, /Upgrade to Pro/i, /Get Pro/i, /^Upgrade$/i
+    ];
+}
+
 const PLAN_UPGRADE_PATTERNS = {
+    go: [/升级至\s*(?:ChatGPT\s*)?Go\b/i, /Upgrade to (?:ChatGPT\s*)?Go\b/i, /Get (?:ChatGPT\s*)?Go\b/i, /Subscribe to (?:ChatGPT\s*)?Go\b/i],
     plus: [/升级至\s*Plus/i, /Upgrade to Plus/i, /Get Plus/i, /Subscribe to Plus/i, /^Upgrade$/i],
-    pro_5x: [/升级至\s*Pro/i, /Upgrade to Pro/i, /Get Pro/i, /^Upgrade$/i],
-    pro_20x: [/升级至\s*Pro/i, /Upgrade to Pro/i, /Get Pro/i, /^Upgrade$/i]
+    pro_10x: proUpgradePatterns(10),
+    pro_20x: proUpgradePatterns(20),
+    pro_50x: proUpgradePatterns(50)
 };
 
 function normalizeOptionText(text) {
@@ -94,7 +105,11 @@ async function isPersonalPlanView(page) {
         .first()
         .isVisible({ timeout: 800 })
         .catch(() => false);
-    return plusTitle || plusBtn;
+    const goBtn = await page.getByRole('button', { name: /Upgrade to (?:ChatGPT\s*)?Go\b|升级至\s*(?:ChatGPT\s*)?Go\b|Get (?:ChatGPT\s*)?Go\b/i })
+        .first()
+        .isVisible({ timeout: 800 })
+        .catch(() => false);
+    return plusTitle || plusBtn || goBtn;
 }
 
 async function isBusinessPlanView(page) {
@@ -634,8 +649,9 @@ async function selectPricingRegion(page, regionCode) {
  * 点击对应套餐的升级按钮
  */
 async function clickPlanUpgrade(page, planType) {
-    const plan = String(planType || 'plus').toLowerCase();
-    const patterns = PLAN_UPGRADE_PATTERNS[plan] || PLAN_UPGRADE_PATTERNS.plus;
+    const plan = normalizePlanType(planType);
+    if (!plan) throw new Error(`不支持的套餐类型: ${String(planType)}`);
+    const patterns = PLAN_UPGRADE_PATTERNS[plan];
     console.log(`📦 [步骤] 正在点击升级按钮 (套餐: ${plan})...`);
 
     await assertChatGptLoggedIn(page, '升级前');
@@ -654,7 +670,7 @@ async function clickPlanUpgrade(page, planType) {
         } catch (_) { /* try next */ }
     }
 
-    const cardTitle = plan === 'plus' ? /ChatGPT Plus/i : /ChatGPT Pro/i;
+    const cardTitle = plan === 'go' ? /ChatGPT Go|^Go$/i : (plan === 'plus' ? /ChatGPT Plus/i : /ChatGPT Pro/i);
     try {
         const card = page.locator('div').filter({ hasText: cardTitle }).filter({ has: page.getByRole('button') }).first();
         const btn = card.getByRole('button').filter({ hasText: /升级|Upgrade|Subscribe|Get/i }).first();
@@ -681,7 +697,14 @@ async function clickPlanUpgrade(page, planType) {
         } catch (_) { /* fall through */ }
     }
 
-    const fallbackSelectors = plan === 'plus'
+    const fallbackSelectors = plan === 'go'
+        ? [
+            'button:has-text("升级至 Go")',
+            'button:has-text("Upgrade to Go")',
+            'button:has-text("Get Go")',
+            'text=ChatGPT Go >> xpath=ancestor::div[.//button[contains(., "Upgrade") or contains(., "升级")]][1] >> button'
+        ]
+        : plan === 'plus'
         ? [
             'button:has-text("升级至 Plus")',
             'button:has-text("Upgrade to Plus")',
@@ -745,6 +768,7 @@ async function waitForCheckoutPage(page, timeout = 90000, failureMessage = () =>
 }
 
 function validateUiCheckoutPayload(payload, { region, planType, planNameOverride }) {
+    if (!normalizePlanType(planType)) return `不支持的套餐类型: ${String(planType)}`;
     const expectedPlan = planNameOverride || resolvePlanName(planType);
     if (payload?.plan_name !== expectedPlan) {
         return `UI Checkout 套餐不匹配：需要 ${expectedPlan}，页面选择 ${payload?.plan_name || 'unknown'}（已停止创建）`;
@@ -763,7 +787,7 @@ async function openPricingCheckout(page, { region, planType, planNameOverride })
     await switchToPersonalPlans(page);
     await selectPricingRegion(page, region);
 
-    // 两个 Pro 档位共用同类按钮；发出请求前核对实际套餐和账单地区，避免悄悄换档。
+    // 多个 Pro 档位可能共用同类按钮；发送前核对套餐和账单地区，避免悄悄换档。
     let requestSeen = false;
     let failure = '';
     let failureBody = Promise.resolve();

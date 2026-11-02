@@ -11,6 +11,7 @@
  */
 
 const axios = require('axios');
+const { normalizePlanType, resolvePlanName } = require('../config/plans');
 
 const DEFAULT_BASE_URL = 'https://kc.vpss.eu.cc/';
 
@@ -124,6 +125,24 @@ async function fetchPlans(cfg) {
         creditPlans,
         raw
     };
+}
+
+/** Resolve the provider's own key from its enabled plan_name, never by guessing. */
+function resolveProviderPlanKey(planType, plans) {
+    const normalized = normalizePlanType(planType);
+    if (!normalized) throw new Error(`不支持的套餐类型: ${String(planType || '')}`);
+    const expected = resolvePlanName(normalized);
+    const keys = [...new Set((Array.isArray(plans) ? plans : [])
+        .filter((plan) => {
+            const enabled = plan?.enabled === true || plan?.enabled === 1
+                || /^(?:1|true|yes)$/i.test(String(plan?.enabled || '').trim());
+            return enabled && String(plan?.plan_name || '').trim().toLowerCase() === expected;
+        })
+        .map((plan) => typeof plan.key === 'string' ? plan.key.trim() : '')
+        .filter(Boolean))];
+    if (!keys.length) throw new Error(`第三方平台没有启用的套餐: ${expected}`);
+    if (keys.length > 1) throw new Error(`第三方平台有多个匹配套餐: ${expected}`);
+    return keys[0];
 }
 
 /**
@@ -326,6 +345,7 @@ module.exports = {
     maskApiKey,
     request,
     fetchPlans,
+    resolveProviderPlanKey,
     inspectPay,
     submitPay,
     queryOrder,

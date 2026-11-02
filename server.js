@@ -9,6 +9,7 @@ const axios = require('axios');
 const store = require('./src/persistence/mysql-store');
 const runtimeLog = require('./src/runtime/runtime-log');
 const { REGION_CONFIG, isSupportedRegion, getPlanTypeLabel } = require('./src/config/region-config');
+const { normalizePlanType } = require('./src/config/plans');
 const taxFreeAddress = require('./src/payments/tax-free-address');
 const { testProxyUrl, normalizeProxyLines } = require('./src/proxy/proxy-pool');
 const { extractSessionPreview, extractAccessTokenFromRaw, parseSessionJson, extractEmailFromSession } = require('./src/browser/session-auth');
@@ -21,6 +22,7 @@ const { testCaptchaPlatformConnectivity, normalizeCaptchaPlatformApiUrl, resolve
 const browserPool = require('./src/browser/browser-pool');
 const { buildWorkerRuntimeEnv } = require('./src/browser/browser-runtime');
 const { querySubscriptionBySession, validateSessionTokenForQuery, cancelAutoRenew, resumeAutoRenew } = require('./src/checkout/subscription-check');
+const { cancelRenewalAfterActivation } = require('./src/checkout/post-activation-renewal');
 const gptApi = require('./src/integrations/gpt-api-client');
 
 const app = express();
@@ -1146,6 +1148,7 @@ function runCheckoutScript(jobKey, scriptPath, env, attempt = 1, onProgress = nu
         let idleTimer = null;
         let finished = false;
         let timedOut = false;
+        let progressUpdates = Promise.resolve();
 
         activeProcesses.add(child);
         const cleanup = () => {
@@ -1159,7 +1162,9 @@ function runCheckoutScript(jobKey, scriptPath, env, attempt = 1, onProgress = nu
             }
             finished = true;
             cleanup();
-            resolve({ attempt, ...result });
+            // Do not let a slow progress write overwrite the terminal payment
+            // or renewal result after the child has already exited.
+            progressUpdates.then(() => resolve({ attempt, ...result }));
         };
 
         const resetIdleTimer = () => {
@@ -1175,11 +1180,15 @@ function runCheckoutScript(jobKey, scriptPath, env, attempt = 1, onProgress = nu
         };
 
         const appendChunk = (source, chunk) => {
+            if (finished) return;
             const text = chunk.toString();
             output += text;
             logTaskChunk(jobKey, attempt, source, text);
             if (onProgress) {
-                onProgress(getCheckoutProgress(output), output).catch((error) => console.error('[Progress Update Error]', error));
+                const snapshot = output;
+                const progress = getCheckoutProgress(snapshot);
+                progressUpdates = progressUpdates.then(() => onProgress(progress, snapshot))
+                    .catch((error) => console.error('[Progress Update Error]', error));
             }
             resetIdleTimer();
         };
@@ -2556,11 +2565,7 @@ app.get('/api/admin/checkout/plans', async (req, res) => {
         res.json({
             success: true,
             plans: store.PLAN_NAME_MAP,
-            resolved: {
-                plus: store.resolvePlanName('plus'),
-                pro_5x: store.resolvePlanName('pro_5x'),
-                pro_20x: store.resolvePlanName('pro_20x')
-            },
+            resolved: { ...store.PLAN_NAME_MAP },
             region: regionCode,
             currency: config.currency,
             label: config.label
@@ -2589,7 +2594,8 @@ app.post('/api/admin/checkout/generate', async (req, res) => {
             return res.status(400).json({ success: false, error: tokenCheck.message });
         }
 
-        const planType = String(body.plan_type || 'plus').trim();
+        const planType = normalizePlanType(body.plan_type);
+        if (!planType) return res.status(400).json({ success: false, error: '不支持的套餐类型' });
         const planNameOverride = body.plan_name ? String(body.plan_name).trim() : '';
         const resolvedPlanName = planNameOverride || store.resolvePlanName(planType);
         const regionCode = String(body.country || body.region || await store.getPaymentRegion()).toUpperCase();
@@ -2954,7 +2960,8 @@ app.post('/api/admin/cdks/generate', requireSecondaryAuth, async (req, res) => {
     try {
         await ensureStoreReady();
         const count = req.body?.count;
-        const planType = req.body?.plan_type || 'plus';
+        const planType = normalizePlanType(req.body?.plan_type);
+        if (!planType) return res.status(400).json({ success: false, message: '不支持的套餐类型' });
         const newCdks = createCdks(count);
         const result = await store.insertCdks(newCdks, { type: '自助', plan_type: planType });
         res.json({
@@ -2977,7 +2984,8 @@ app.post('/api/admin/cdks/import', requireSecondaryAuth, async (req, res) => {
 
     try {
         await ensureStoreReady();
-        const planType = req.body?.plan_type || 'plus';
+        const planType = normalizePlanType(req.body?.plan_type);
+        if (!planType) return res.status(400).json({ success: false, message: '不支持的套餐类型' });
         const summary = await store.insertCdks(cdks, { plan_type: planType });
         res.json({
             success: true,
@@ -3198,12 +3206,6 @@ function spawnCheckoutDebugWorker({ task, token, sessionRaw, planType, region, p
  * 4. 轮询订单/任务状态，直到终态（success / failed）
  * 5. 将结果写回 task_logs（含 gpt_api_order_id / gpt_api_task_id / gpt_api_raw）
  */
-const GPT_API_PLAN_MAP = Object.freeze({ plus: 'plus', pro_5x: 'pro5x', pro_20x: 'pro20x' });
-
-function mapGptApiPlanKey(planType) {
-    return GPT_API_PLAN_MAP[String(planType || '').trim()] || 'plus';
-}
-
 function parseCardExpiry(value) {
     const match = String(value || '').trim().match(/^(0?[1-9]|1[0-2])\s*\/?\s*(\d{2}|\d{4})$/);
     if (!match) throw new Error('银行卡有效期格式错误，应为 MMYY、MM/YY 或 MM/YYYY');
@@ -3211,7 +3213,20 @@ function parseCardExpiry(value) {
     return { month: Number(match[1]), year };
 }
 
-async function runGptApiWorker({ task, token, session, cdk, planType }) {
+async function finishUserActivationRenewal({ jobKey, token, email, cdk, proxy }) {
+    const message = '充值成功，正在关闭自动续费并确认状态，请稍候...';
+    // Keep the task non-terminal: the public client closes its WebSocket as soon
+    // as it sees success, so it must not miss the final renewal result.
+    await store.updateTaskLog(jobKey, { status: 'running', progress: 99, message, cdkCode: cdk }).catch(() => {
+        logTask(jobKey, '[AutoRenew] 进度记录暂时失败，仍继续关闭自动续费', 'warn');
+    });
+    broadcastToTask(jobKey, { type: 'progress', jobKey, status: 'running', progress: 99, message, cdkCode: cdk });
+    const renewal = await cancelRenewalAfterActivation(token, { email, proxy });
+    logTask(jobKey, `[AutoRenew] ${renewal.message}`, renewal.state === 'disabled' ? 'log' : 'warn');
+    return renewal.message;
+}
+
+async function runGptApiWorker({ task, token, session, cdk, planType, cancelAutoRenewOnSuccess = false }) {
     const { jobKey } = task;
     const sessionPayload = session && typeof session === 'object'
         ? session
@@ -3241,7 +3256,9 @@ async function runGptApiWorker({ task, token, session, cdk, planType }) {
             throw new Error('第三方代充 API Key 未配置');
         }
 
-        const apiPlanKey = mapGptApiPlanKey(planType);
+        const plansResult = await gptApi.fetchPlans(cfg);
+        if (!plansResult.success) throw new Error(`第三方套餐查询失败: ${plansResult.error || '未知错误'}`);
+        const apiPlanKey = gptApi.resolveProviderPlanKey(planType, plansResult.gptPlans);
         await setProgress('running', 10, '正在检查 Session 格式...');
         const inspect = await gptApi.inspectPay(cfg, {
             planKey: apiPlanKey,
@@ -3343,6 +3360,15 @@ async function runGptApiWorker({ task, token, session, cdk, planType }) {
                 const failureDetail = businessResult.error || lastRaw?.error || businessResult.status || rawStatus || 'unknown';
                 finalStatus = succeeded ? 'success' : 'failed';
                 finalMessage = succeeded ? '第三方代充开通成功' : `第三方代充失败: ${failureDetail}`;
+                if (succeeded) {
+                    // A completed payment must not be retried or refunded as an
+                    // unused CDK if renewal cancellation or bookkeeping fails.
+                    shouldRollbackCdk = false;
+                    if (cancelAutoRenewOnSuccess) {
+                        const renewalMessage = await finishUserActivationRenewal({ jobKey, token, email: accountEmail, cdk, proxy });
+                        finalMessage += `；${renewalMessage}`;
+                    }
+                }
                 await setProgress(
                     finalStatus,
                     succeeded ? 100 : 99,
@@ -3381,21 +3407,28 @@ async function runGptApiWorker({ task, token, session, cdk, planType }) {
         console.error(`[GPT API Task Error] ${jobKey}:`, error);
         logTask(jobKey, `第三方代充任务异常: ${error.message}`, 'error');
         await store.releaseCard(reservedCard?.id).catch(() => { });
+        const status = shouldRollbackCdk ? 'failed' : 'success';
+        const message = shouldRollbackCdk ? error.message
+            : (cancelAutoRenewOnSuccess
+                ? '充值成功，但自动续费关闭结果或后续处理未能确认，请联系管理员核实；请勿重复充值'
+                : '充值成功，后续记录处理异常，请联系管理员核实；请勿重复充值');
         await store.updateTaskLog(jobKey, {
-            status: 'failed',
-            message: error.message,
-            progress: 0,
+            status,
+            message,
+            progress: shouldRollbackCdk ? 0 : 100,
             cdkCode: cdk
+        }).catch(() => {
+            logTask(jobKey, '任务结果暂时无法保存，仍向客户端发送结果', 'warn');
         });
         broadcastToTask(jobKey, {
             type: 'status',
             jobKey,
-            status: 'failed',
-            message: error.message,
+            status,
+            message,
             cdkCode: cdk,
-            progress: 0
+            progress: shouldRollbackCdk ? 0 : 100
         });
-        notifyTaskOutcome({ event: 'failure', email: accountEmail, cdk, jobKey, message: error.message });
+        notifyTaskOutcome({ event: shouldRollbackCdk ? 'failure' : 'success', email: accountEmail, cdk, jobKey, message });
     } finally {
         releaseForegroundSlot(jobKey);
         if (shouldRollbackCdk) {
@@ -3436,13 +3469,14 @@ function isTerminalGptApiStatus(rawStatus) {
     return [...GPT_API_TERMINAL_FAILED].some((kw) => s.includes(kw.toLowerCase()));
 }
 
-function spawnActivationWorker({ task, token, sessionRaw, cdk, cdkDetails, clientIp }) {
-    (async () => {
+function spawnActivationWorker({ task, token, sessionRaw, cdk, cdkDetails, clientIp, cancelAutoRenewOnSuccess = false }) {
+    return (async () => {
         const checkoutScript = path.join(__dirname, 'index.js');
         let finalRun = null;
         const allOutputs = [];
         let shouldRollbackCdk = true;
         let lastProgress = 0;
+        let paymentProxy = '';
         const accountEmail = extractEmailFromSession(sessionRaw) || task.tokenPreview || '';
 
         try {
@@ -3460,6 +3494,7 @@ function spawnActivationWorker({ task, token, sessionRaw, cdk, cdkDetails, clien
                 });
 
                 const proxy = await store.getActiveProxy();
+                paymentProxy = proxy;
                 const hcaptchaCfg = await store.getHcaptchaConfig();
                 const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
                 const runtimeEnv = {
@@ -3515,7 +3550,13 @@ function spawnActivationWorker({ task, token, sessionRaw, cdk, cdkDetails, clien
                 allOutputs.push(`===== ATTEMPT ${attempt}${cardLast4 ? ` | CARD ${cardLast4}` : ''} =====\n${run.output}`);
                 finalRun = { ...run, output: allOutputs.join('\n\n') };
 
-                const currentStatus = run.analysis.status === 'success' ? 'success' : 'running';
+                if (run.analysis.status === 'success') {
+                    shouldRollbackCdk = false;
+                    // Go straight to renewal handling after a public recharge.
+                    // Optional progress persistence must not prevent cancelling.
+                    if (cancelAutoRenewOnSuccess) break;
+                }
+                const currentStatus = run.analysis.status === 'success' && !cancelAutoRenewOnSuccess ? 'success' : 'running';
                 const currentProgress = normalizeTaskProgress(
                     getCheckoutProgress(run.output, currentStatus),
                     currentStatus,
@@ -3541,7 +3582,7 @@ function spawnActivationWorker({ task, token, sessionRaw, cdk, cdkDetails, clien
                     cardLast4
                 });
 
-                if (!run.analysis.shouldRetry || attempt >= MAX_PROCESS_ATTEMPTS) {
+                if (run.analysis.status === 'success' || !run.analysis.shouldRetry || attempt >= MAX_PROCESS_ATTEMPTS) {
                     logTask(task.jobKey, `尝试 ${attempt} 结束，status=${run.analysis.status} shouldRetry=${run.analysis.shouldRetry}`);
                     break;
                 }
@@ -3553,15 +3594,23 @@ function spawnActivationWorker({ task, token, sessionRaw, cdk, cdkDetails, clien
                 ? { ...finalRun.analysis, status: 'failed', message: String(finalRun.analysis.message || '激活失败').replace('，准备重试', '') }
                 : finalRun?.analysis;
             const finalStatus = normalizedAnalysis?.status || 'failed';
+            let finalMessage = normalizedAnalysis?.message || (finalStatus === 'success' ? '激活成功' : '开通失败');
+            if (finalStatus === 'success' && cancelAutoRenewOnSuccess) {
+                const renewalMessage = await finishUserActivationRenewal({
+                    jobKey: task.jobKey, token, email: accountEmail, cdk, proxy: paymentProxy
+                });
+                finalMessage += `；${renewalMessage}`;
+            }
 
             const finalProgress = normalizeTaskProgress(finalStatus === 'success' ? 100 : lastProgress, finalStatus, lastProgress);
             const taskMedia = extractTaskMediaFromOutput(rawOutput);
             const failureScreenshots = [...taskMedia.screenshots, ...taskMedia.videos];
             await store.updateTaskLog(task.jobKey, {
                 status: finalStatus,
-                message: normalizedAnalysis?.message || null,
+                message: finalMessage,
                 rawOutput,
                 cdkCode: cdk,
+                cardLast4: extractCardLast4FromOutput(rawOutput) || null,
                 progress: finalProgress,
                 failureScreenshots
             });
@@ -3570,7 +3619,7 @@ function spawnActivationWorker({ task, token, sessionRaw, cdk, cdkDetails, clien
                 type: 'status',
                 jobKey: task.jobKey,
                 status: finalStatus,
-                message: normalizedAnalysis?.message,
+                message: finalMessage,
                 cdkCode: cdk,
                 progress: finalProgress,
                 screenshots: taskMedia.screenshots,
@@ -3579,7 +3628,7 @@ function spawnActivationWorker({ task, token, sessionRaw, cdk, cdkDetails, clien
 
             logTask(
                 task.jobKey,
-                `任务结束 status=${finalStatus} progress=${finalProgress} message=${normalizedAnalysis?.message || ''}`
+                `任务结束 status=${finalStatus} progress=${finalProgress} message=${finalMessage}`
             );
 
             if (finalStatus === 'success') {
@@ -3593,7 +3642,7 @@ function spawnActivationWorker({ task, token, sessionRaw, cdk, cdkDetails, clien
                     email: accountEmail,
                     cdk,
                     jobKey: task.jobKey,
-                    message: normalizedAnalysis?.message || '激活成功'
+                    message: finalMessage
                 });
             } else if (isCardPoolExhaustedIssue(rawOutput, normalizedAnalysis)) {
                 notifyTaskOutcome({
@@ -3655,27 +3704,34 @@ function spawnActivationWorker({ task, token, sessionRaw, cdk, cdkDetails, clien
         } catch (bgError) {
             console.error(`[Background Task Error] ${task.jobKey}:`, bgError);
             logTask(task.jobKey, `后台任务异常: ${bgError.message}`, 'error');
+            const status = shouldRollbackCdk ? 'failed' : 'success';
+            const message = shouldRollbackCdk ? bgError.message
+                : (cancelAutoRenewOnSuccess
+                    ? '充值成功，但自动续费关闭结果或后续处理未能确认，请联系管理员核实；请勿重复充值'
+                    : '充值成功，后续记录处理异常，请联系管理员核实；请勿重复充值');
             await store.updateTaskLog(task.jobKey, {
-                status: 'failed',
-                message: bgError.message,
-                rawOutput: bgError.message,
+                status,
+                message,
+                rawOutput: finalRun?.output || bgError.message,
                 cdkCode: cdk,
-                progress: normalizeTaskProgress(lastProgress, 'failed', lastProgress)
+                progress: normalizeTaskProgress(shouldRollbackCdk ? lastProgress : 100, status, lastProgress)
+            }).catch(() => {
+                logTask(task.jobKey, '任务结果暂时无法保存，仍向客户端发送结果', 'warn');
             });
             broadcastToTask(task.jobKey, {
                 type: 'status',
                 jobKey: task.jobKey,
-                status: 'failed',
-                message: bgError.message,
+                status,
+                message,
                 cdkCode: cdk,
-                progress: normalizeTaskProgress(lastProgress, 'failed', lastProgress)
+                progress: normalizeTaskProgress(shouldRollbackCdk ? lastProgress : 100, status, lastProgress)
             });
             notifyTaskOutcome({
-                event: 'failure',
+                event: shouldRollbackCdk ? 'failure' : 'success',
                 email: accountEmail,
                 cdk,
                 jobKey: task.jobKey,
-                message: bgError.message
+                message
             });
             if (shouldRollbackCdk) {
                 await store.markCdkUnused(cdk);
@@ -3734,6 +3790,10 @@ async function handleActivationRequest(req, res) {
         if (!cdkDetails || cdkDetails.used_at || cdkDetails.type !== '自助') {
             return res.status(403).json({ success: false, message: 'CDK 无效、已使用或非自助激活码' });
         }
+        const planType = normalizePlanType(cdkDetails.plan_type);
+        if (!planType) {
+            return res.status(400).json({ success: false, message: `不支持的套餐类型: ${cdkDetails.plan_type}` });
+        }
 
         const cdkCooldownMinutes = getRemainingCooldownMinutes(cdkDetails.cooldown_until);
         if (cdkCooldownMinutes > 0) {
@@ -3790,15 +3850,19 @@ async function handleActivationRequest(req, res) {
             progress: 3
         });
 
-        logTask(task.jobKey, `任务已创建，CDK=${cdk} mode=${useGptApi ? 'gpt-api' : 'local'}`);
+        // Source is determined on the server, never from a client-supplied flag.
+        const cancelAutoRenewOnSuccess = req.path.replace(/\/$/, '').toLowerCase() === '/api/run-process';
+        logTask(task.jobKey, `任务已创建，CDK=${cdk} mode=${useGptApi ? 'gpt-api' : 'local'} cancel_auto_renew=${cancelAutoRenewOnSuccess}`);
         reserveForegroundSlot(task.jobKey);
 
         if (useGptApi) {
-            runGptApiWorker({ task, token, session: JSON.parse(storedSession), cdk, planType: cdkDetails.plan_type || 'plus' }).catch((error) => {
+            runGptApiWorker({ task, token, session: JSON.parse(storedSession), cdk, planType, cancelAutoRenewOnSuccess }).catch((error) => {
                 console.error(`[GPT API Worker] ${task.jobKey}:`, error);
             });
         } else {
-            spawnActivationWorker({ task, token, sessionRaw: storedSession, cdk, cdkDetails, clientIp });
+            spawnActivationWorker({ task, token, sessionRaw: storedSession, cdk, cdkDetails, clientIp, cancelAutoRenewOnSuccess }).catch((error) => {
+                console.error(`[Activation Worker] ${task.jobKey}:`, error);
+            });
         }
 
         return res.json({
@@ -3841,6 +3905,9 @@ app.post('/api/verify-cdk', async (req, res) => {
             });
         }
         if (cdkData && !cdkData.used_at) {
+            if (!normalizePlanType(cdkData.plan_type)) {
+                return res.status(400).json({ success: false, message: `不支持的套餐类型: ${cdkData.plan_type}` });
+            }
             if (cdkData.type === '自助') {
                 const cdkCooldownMinutes = getRemainingCooldownMinutes(cdkData.cooldown_until);
                 if (cdkCooldownMinutes > 0) {

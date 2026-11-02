@@ -17,11 +17,7 @@ const SUPPORTED_REGIONS = Object.keys(REGION_CONFIG);
 /** 默认支付地区 */
 const DEFAULT_REGION = 'PH';
 
-const PLAN_TYPE_LABELS = {
-    plus: 'ChatGPT Plus',
-    pro_5x: 'ChatGPT Pro 5x',
-    pro_20x: 'ChatGPT Pro 20x'
-};
+const { PLAN_TYPE_LABELS, getPlanTypeLabel } = require('./plans');
 
 /**
  * 检查地区代码是否在支持列表中
@@ -61,10 +57,6 @@ function getRegionBrowserProfile(regionCode) {
         locale: cfg.locale,
         timezoneId: cfg.timezone
     };
-}
-
-function getPlanTypeLabel(planType) {
-    return PLAN_TYPE_LABELS[planType] || PLAN_TYPE_LABELS.plus;
 }
 
 module.exports = {
