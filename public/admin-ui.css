@@ -1,4 +1,4 @@
-/* KC workspace: shared layout and motion layer. No business selectors are removed. */
+/* FISH workspace: shared layout and motion layer. No business selectors are removed. */
 :root {
     --sidebar-width: 238px;
     --primary: #315efb;
@@ -25,9 +25,9 @@ body { background: var(--bg-page); }
     scrollbar-width: thin; scrollbar-color: #34415c transparent;
 }
 .sidebar-brand { gap: 10px; padding: 0 10px; margin-bottom: 30px; min-height: 42px; }
-.brand-logo { width: 34px; height: 36px; border-radius: 11px; background: #416bff; box-shadow: 0 6px 16px #080f2460; flex-shrink: 0; }
-.brand-logo svg { width: 20px; height: 20px; }
-.brand-name { color: #f5f7ff; -webkit-text-fill-color: #f5f7ff; font-size: 14px; letter-spacing: .1px; line-height: 1.5; }
+.brand-logo { width: 36px; height: 36px; padding: 5px; border-radius: 11px; background: #fff; box-shadow: 0 6px 16px #080f2460; flex-shrink: 0; }
+.brand-logo img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.brand-name { color: #f5f7ff; -webkit-text-fill-color: #f5f7ff; font-size: 13px; letter-spacing: .1px; line-height: 1.5; }
 .nav-menu { gap: 5px; position: relative; isolation: isolate; }
 .kc-nav-indicator { position: absolute; left: 0; top: 0; pointer-events: none; z-index: -1; background: #315efb; border-radius: 10px; box-shadow: 0 5px 16px #090f2b36; transition: transform 280ms var(--motion-ease), width 280ms var(--motion-ease), height 280ms var(--motion-ease); }
 .nav-menu.kc-nav-ready .nav-item.active { background: transparent; box-shadow: none; }

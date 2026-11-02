@@ -41,7 +41,9 @@ async function fixture(options = {}) {
         if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: fs.readFileSync(path.join(root, 'public/admin.html'), 'utf8') });
         if (url.pathname === '/admin-ui.css' || url.pathname === '/admin-ui.js') return route.fulfill({ contentType: url.pathname.endsWith('.css') ? 'text/css' : 'text/javascript', body: fs.readFileSync(path.join(root, 'public', url.pathname), 'utf8') });
         if (url.pathname === '/admin-login') return route.fulfill({ contentType: 'text/html', body: '<h1>本地鉴权入口</h1>' });
-        if (url.pathname === '/favicon.svg') return route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg"/>' });
+        if (url.pathname === '/favicon.png' || url.pathname === '/images/gpt-logo.png') {
+            return route.fulfill({ contentType: 'image/png', body: fs.readFileSync(path.join(root, 'public', url.pathname)) });
+        }
         state.requests.push({ path: url.pathname, method: request.method(), body: request.postDataJSON(), auth: request.headers().authorization });
         let response = { success: true };
         if (url.pathname === '/api/admin/data') response = data;

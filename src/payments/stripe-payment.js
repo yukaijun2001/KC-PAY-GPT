@@ -549,13 +549,16 @@ async function completeStripeCardPayment(page, cardInfo, address, options = {}) 
 
         // 等待账单地址区域出现（chatgpt.com/checkout 在填完卡号后才会展示）
         console.log('[Stripe] Step 5: 等待账单地址表单出现...');
+        const billingWaitStarted = Date.now();
         await waitForBillingFields(page, 25000);
+        console.log(`[Checkout/耗时] 等待账单字段 ${Date.now() - billingWaitStarted}ms`);
         await page.waitForTimeout(1200);
 
         holderName = generateRandomName();
 
         // Step 6: Fill billing address (after card fields) — 仅填必填项
         console.log('[Stripe] Step 6: 填写账单地址与姓名...');
+        const billingStarted = Date.now();
         if (openAiCheckout) {
             const billingResult = await fillOpenAiCheckoutBilling(page, address, holderName);
             if (!billingResult.ok) {
@@ -612,6 +615,7 @@ async function completeStripeCardPayment(page, cardInfo, address, options = {}) 
                 console.log(`[Stripe] ✅ 持卡人姓名已填写: ${stripeHolderName}`);
             }
         }
+        console.log(`[Checkout/耗时] 账单填写 ${Date.now() - billingStarted}ms`);
 
         // Step 8: Check service agreement checkbox if present
         console.log('[Stripe] Step 8: 检查服务协议...');
@@ -1100,7 +1104,13 @@ async function waitForBillingFields(page, timeout = 20000) {
                 }
             } catch (_) { /* continue */ }
         }
-        await page.waitForTimeout(500);
+        // Some Checkout versions expose only accessible labels, without the
+        // billingAddress-* ids. They are ready even when the old selectors miss.
+        for (const label of [/^full name$/i, /^billing name$/i, /^address line 1$/i, /^street address$/i, /^账单姓名$|^街道地址$|^地址行\s*1$/]) {
+            if (await page.getByLabel(label).first().isVisible().catch(() => false)) return true;
+        }
+        const remaining = deadline - Date.now();
+        if (remaining > 0) await page.waitForTimeout(Math.min(200, remaining));
     }
     console.warn('[Stripe] ⚠️ 账单地址字段未在超时内出现，将尝试继续填写');
     return false;
@@ -1145,8 +1155,42 @@ const OPENAI_BILLING_FIELD_SELECTORS = {
     ]
 };
 
-async function resolveElementTag(el) {
-    return el.evaluate((node) => node.tagName.toLowerCase()).catch(() => '');
+async function resolveElementTag(el, timeout = 1000) {
+    return el.evaluate((node) => node.tagName.toLowerCase(), undefined, { timeout }).catch(() => '');
+}
+
+function billingActionTimeout(deadline, maximum = 1500) {
+    return Math.max(0, Math.min(maximum, deadline - Date.now()));
+}
+
+async function selectNativeBillingOption(el, optionLabels, logLabel, deadline) {
+    let timeout = billingActionTimeout(deadline);
+    if (!timeout) return false;
+    // Read the actual option list once. Trying selectOption(label), then value,
+    // for each absent alias otherwise spends a full action timeout per alias.
+    const match = await el.evaluate((node, labels) => {
+        if (node.tagName !== 'SELECT' || node.matches(':disabled')) return null;
+        const normalize = (value) => String(value).trim().replace(/\s+/g, ' ').toLowerCase();
+        const choices = Array.from(node.options).filter((option) => option.value && !option.matches(':disabled'));
+        for (const label of labels) {
+            const wanted = normalize(label);
+            const option = choices.find((choice) => normalize(choice.value) === wanted)
+                || choices.find((choice) => normalize(choice.label) === wanted);
+            if (option) return { value: option.value, selected: option.selected };
+        }
+        return null;
+    }, optionLabels.map(String), { timeout }).catch(() => null);
+    if (!match) return false;
+    if (match.selected) return true;
+    const visible = await el.isVisible().catch(() => false);
+    timeout = billingActionTimeout(deadline);
+    if (!timeout) return false;
+    const selected = await el.selectOption({ value: match.value }, {
+        timeout, force: !visible
+    }).catch(() => []);
+    if (!selected.includes(match.value)) return false;
+    console.log(`  [Stripe] ✅ ${logLabel}: ${match.value} (value)`);
+    return true;
 }
 
 async function fillFirstVisibleSelector(page, selectors, value, logLabel, waitMs = 8000) {
@@ -1182,34 +1226,26 @@ async function selectFirstVisibleSelect(page, selectors, optionLabels, logLabel,
     const deadline = Date.now() + waitMs;
     while (Date.now() < deadline) {
         for (const sel of selectors) {
+            if (!billingActionTimeout(deadline)) return false;
             try {
                 const el = page.locator(sel).first();
                 if ((await el.count()) === 0) continue;
-                const tag = await resolveElementTag(el);
+                const tagTimeout = billingActionTimeout(deadline);
+                if (!tagTimeout) return false;
+                const tag = await resolveElementTag(el, tagTimeout);
                 if (tag !== 'select') {
                     if (!(await el.isVisible({ timeout: 300 }).catch(() => false))) continue;
-                    const ok = await selectBillingComboboxItem(page, { el }, options, logLabel);
+                    const remaining = billingActionTimeout(deadline, waitMs);
+                    if (!remaining) return false;
+                    const ok = await selectBillingComboboxItem(page, { el }, options, logLabel, remaining);
                     if (ok) return true;
                     continue;
                 }
-                // 原生 <select> 常被视觉隐藏（自定义下拉覆盖），不要求 visible，直接 selectOption
-                for (const opt of options) {
-                    try {
-                        await el.selectOption({ label: opt }, { timeout: 2000 });
-                        console.log(`  [Stripe] ✅ ${logLabel}: ${opt}`);
-                        await page.waitForTimeout(600);
-                        return true;
-                    } catch (_) { /* next */ }
-                    try {
-                        await el.selectOption({ value: opt }, { timeout: 2000 });
-                        console.log(`  [Stripe] ✅ ${logLabel}: ${opt} (value)`);
-                        await page.waitForTimeout(600);
-                        return true;
-                    } catch (_) { /* next */ }
-                }
+                if (await selectNativeBillingOption(el, options, logLabel, deadline)) return true;
             } catch (_) { /* next selector */ }
         }
-        await page.waitForTimeout(500);
+        const remaining = billingActionTimeout(deadline, 200);
+        if (remaining) await page.waitForTimeout(remaining);
     }
     return false;
 }
@@ -1342,14 +1378,18 @@ async function focusOpenAiBillingSection(page) {
     await page.locator('body').click({ position: { x: 12, y: 12 }, timeout: 2000 }).catch(() => { });
     await page.keyboard.press('Escape').catch(() => { });
     const heading = page.getByText(/^Billing address$|^账单地址$/i).first();
-    await heading.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => { });
-    await heading.click({ timeout: 5000 }).catch(() => { });
+    if (await heading.isVisible().catch(() => false)) {
+        await heading.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => { });
+        await heading.click({ timeout: 1000 }).catch(() => { });
+    }
     await page.waitForTimeout(700);
 }
 
 async function getBillingInputsBelowHeading(page) {
     const heading = page.getByText(/^Billing address$|^账单地址$/i).first();
-    await heading.waitFor({ state: 'visible', timeout: 10000 });
+    // The form readiness wait happens before filling. A missing optional title
+    // must not add another ten seconds to every value read and fallback scan.
+    if (!(await heading.isVisible().catch(() => false))) return [];
     const headingBox = await heading.boundingBox().catch(() => null);
     const minY = headingBox ? headingBox.y - 6 : 0;
 
@@ -1443,57 +1483,54 @@ async function pickBillingItem(items, matchers) {
     return null;
 }
 
-async function selectBillingComboboxItem(page, item, optionLabels, logLabel) {
+async function selectBillingComboboxItem(page, item, optionLabels, logLabel, timeoutMs = 5000) {
     if (!item?.el) return false;
-    const options = optionLabels.filter(Boolean);
+    const options = [...new Set(optionLabels.filter(Boolean).map(String))];
+    const deadline = Date.now() + timeoutMs;
+    if (!options.length || !billingActionTimeout(deadline)) return false;
     try {
-        await item.el.scrollIntoViewIfNeeded();
         let tag = String(item.meta?.tag || '').toLowerCase();
         if (!tag || tag === 'unknown') {
-            tag = await resolveElementTag(item.el);
+            const timeout = billingActionTimeout(deadline);
+            if (!timeout) return false;
+            tag = await resolveElementTag(item.el, timeout);
         }
         if (tag === 'select') {
-            for (const opt of options) {
-                try {
-                    await item.el.selectOption({ label: String(opt) });
-                    console.log(`  [Stripe] ✅ ${logLabel}: ${opt}`);
-                    await page.waitForTimeout(600);
-                    return true;
-                } catch (_) { /* next */ }
-                try {
-                    await item.el.selectOption({ value: String(opt) });
-                    console.log(`  [Stripe] ✅ ${logLabel}: ${opt} (value)`);
-                    await page.waitForTimeout(600);
-                    return true;
-                } catch (_) { /* next */ }
-            }
-            return false;
+            return selectNativeBillingOption(item.el, options, logLabel, deadline);
         }
 
         if (tag === 'input' || tag === 'textarea') {
-            await item.el.fill(String(options[0] || ''));
+            const timeout = billingActionTimeout(deadline);
+            if (!timeout) return false;
+            await item.el.fill(options[0], { timeout });
             await page.keyboard.press('ArrowDown').catch(() => { });
             await page.keyboard.press('Enter').catch(() => { });
             console.log(`  [Stripe] ✅ ${logLabel}: ${options[0]} (typeahead)`);
             return true;
         }
 
-        await item.el.click({ timeout: 3000 });
-        await page.waitForTimeout(350);
-        for (const opt of options) {
-            try {
-                const option = page.getByRole('option', { name: opt }).first();
-                if (await option.isVisible({ timeout: 1200 })) {
-                    await option.click({ timeout: 2000 });
-                    console.log(`  [Stripe] ✅ ${logLabel}: ${opt}`);
-                    return true;
+        const timeout = billingActionTimeout(deadline);
+        if (!timeout) return false;
+        await item.el.click({ timeout });
+        while (billingActionTimeout(deadline)) {
+            for (const opt of options) {
+                for (const option of [
+                    page.getByRole('option', { name: opt, exact: true }).first(),
+                    page.getByRole('option', { name: opt }).first(),
+                    page.getByText(opt, { exact: true }).first()
+                ]) {
+                    try {
+                        if (!(await option.isVisible().catch(() => false))) continue;
+                        const remaining = billingActionTimeout(deadline);
+                        if (!remaining) return false;
+                        await option.click({ timeout: remaining });
+                        console.log(`  [Stripe] ✅ ${logLabel}: ${opt}`);
+                        return true;
+                    } catch (_) { /* next */ }
                 }
-            } catch (_) { /* next */ }
-            try {
-                await page.getByText(opt, { exact: true }).click({ timeout: 1200 });
-                console.log(`  [Stripe] ✅ ${logLabel}: ${opt}`);
-                return true;
-            } catch (_) { /* next */ }
+            }
+            const remaining = billingActionTimeout(deadline, 100);
+            if (remaining) await page.waitForTimeout(remaining);
         }
     } catch (error) {
         console.log(`  [Stripe] ⚠️ ${logLabel} 选择失败: ${error.message}`);
@@ -1774,6 +1811,7 @@ async function fillBillingControl(page, labelPatterns, value, logLabel) {
 }
 
 async function selectBillingCountry(page, optionLabels) {
+    const started = Date.now();
     console.log('  [Stripe] 选择国家...');
     const ok = await selectFirstVisibleSelect(
         page,
@@ -1781,7 +1819,10 @@ async function selectBillingCountry(page, optionLabels) {
         optionLabels,
         '国家'
     );
-    if (ok) return true;
+    if (ok) {
+        console.log(`  [Checkout/耗时] 国家选择 ${Date.now() - started}ms`);
+        return true;
+    }
 
     const patterns = [/country or region/i, /国家或地区/i, /^country$/i, /国家/];
     let field = null;
@@ -1797,10 +1838,13 @@ async function selectBillingCountry(page, optionLabels) {
         return false;
     }
 
-    return selectBillingComboboxItem(page, { el: field }, optionLabels, '国家');
+    const selected = await selectBillingComboboxItem(page, { el: field }, optionLabels, '国家');
+    console.log(`  [Checkout/耗时] 国家选择 ${Date.now() - started}ms result=${selected}`);
+    return selected;
 }
 
 async function selectBillingState(page, stateFullName, stateRaw) {
+    const started = Date.now();
     console.log('  [Stripe] 选择州...');
     const options = [stateFullName, stateRaw].filter(Boolean);
     const ok = await selectFirstVisibleSelect(
@@ -1809,7 +1853,10 @@ async function selectBillingState(page, stateFullName, stateRaw) {
         options,
         '州/省'
     );
-    if (ok) return true;
+    if (ok) {
+        console.log(`  [Checkout/耗时] 州/省选择 ${Date.now() - started}ms`);
+        return true;
+    }
 
     const patterns = [/^state$/i, /^province$/i, /^州$/i, /^省$/i, /address-level1/i];
     let field = await findBillingControl(page, patterns, 'combobox');
@@ -1821,13 +1868,15 @@ async function selectBillingState(page, stateFullName, stateRaw) {
         return false;
     }
 
-    return selectBillingComboboxItem(page, { el: field }, options, '州');
+    const selected = await selectBillingComboboxItem(page, { el: field }, options, '州');
+    console.log(`  [Checkout/耗时] 州/省选择 ${Date.now() - started}ms result=${selected}`);
+    return selected;
 }
 
 async function locateOpenAiBillingHeading(page) {
     const heading = page.getByText(/^Billing address$|^账单地址$/i).first();
-    await heading.waitFor({ state: 'visible', timeout: 10000 });
-    await heading.scrollIntoViewIfNeeded();
+    if (!(await heading.isVisible().catch(() => false))) return null;
+    await heading.scrollIntoViewIfNeeded({ timeout: 1000 });
     return heading;
 }
 
@@ -1948,8 +1997,11 @@ async function fillOpenAiCheckoutBilling(page, address, fullName) {
     }
 
     try {
-        await locateOpenAiBillingHeading(page);
-        console.log('  [Stripe] ✅ 已定位账单地址区块');
+        if (await locateOpenAiBillingHeading(page)) {
+            console.log('  [Stripe] ✅ 已定位账单地址区块');
+        } else {
+            console.log('  [Stripe] 账单标题未显示，直接按字段标签定位');
+        }
     } catch (e) {
         console.warn(`  [Stripe] ⚠️ 账单标题不可见: ${e.message}`);
     }
@@ -2128,7 +2180,9 @@ async function readBillingInputValues(page) {
         if (result[key]) continue;
         for (const sel of selectors) {
             try {
-                const val = String(await page.locator(sel).first().inputValue({ timeout: 500 }).catch(() => '')).trim();
+                const input = page.locator(sel).first();
+                if (!(await input.count())) continue;
+                const val = String(await input.inputValue({ timeout: 500 }).catch(() => '')).trim();
                 if (val) {
                     result[key] = val;
                     break;
@@ -2808,6 +2862,10 @@ module.exports = {
     saveDebugScreenshot,
     waitForStripeFrame,
     waitForBillingFields,
+    selectFirstVisibleSelect,
+    selectBillingComboboxItem,
+    getBillingInputsBelowHeading,
+    readBillingInputValues,
     fillBillingAddress,
     fillOpenAiCheckoutBilling,
     discoverCardInputs,

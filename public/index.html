@@ -1,68 +1,78 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="recharge-document">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ChatGPT 订阅自动开通 | KC GPT</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <title>ChatGPT 订阅自动开通 | FISH GPT</title>
+    <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/recharge-ui.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 
-<body class="recharge-page">
-    <div class="page-shell">
+<body class="recharge-page recharge-landing" id="top">
+    <div class="recharge-grid" aria-hidden="true"></div>
+    <header class="landing-header" id="landing_header">
+        <div class="landing-header-inner">
+            <a class="landing-brand" href="#top" aria-label="FISH GPT 首页">
+                <img src="/images/gpt-logo.png" alt="" width="28" height="28">
+                <span>FISH<span class="brand-divider">/</span>GPT</span>
+            </a>
+            <nav class="landing-desktop-nav" aria-label="主导航">
+                <a href="#plans" data-open-plans>套餐说明</a>
+                <a href="/subscription">发票助手</a>
+                <a href="#faq">常见问题</a>
+            </nav>
+            <a class="landing-button landing-nav-cta" href="#recharge" data-focus-recharge>开始兑换 <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
+            <button class="landing-icon-button landing-menu-toggle" id="landing_menu_toggle" type="button" aria-label="打开导航菜单" aria-haspopup="dialog" aria-controls="landing_nav_dialog" aria-expanded="false">
+                <i data-lucide="menu" aria-hidden="true"></i>
+            </button>
+        </div>
+    </header>
+    <dialog class="landing-nav-dialog" id="landing_nav_dialog" aria-labelledby="landing_nav_title">
+        <div class="landing-dialog-head">
+            <strong id="landing_nav_title">FISH / GPT</strong>
+            <button class="landing-icon-button" type="button" data-close-nav aria-label="关闭导航菜单"><i data-lucide="x" aria-hidden="true"></i></button>
+        </div>
+        <nav class="landing-dialog-links" aria-label="移动端导航">
+            <a href="#plans" data-open-plans>套餐说明 <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
+            <a href="/subscription">发票助手 <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
+            <a href="#faq">常见问题 <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
+        </nav>
+        <a class="landing-button landing-dialog-cta" href="#recharge" data-focus-recharge>开始兑换 <i data-lucide="arrow-right" aria-hidden="true"></i></a>
+    </dialog>
+    <div class="page-shell recharge-shell">
+        <section class="recharge-hero" aria-labelledby="recharge-title">
         <header class="site-hero">
-            <div class="hero-eyebrow">Instant AI Top-Ups</div>
-            <h1>ChatGPT 订阅自动开通</h1>
-            <p class="hero-subtitle">通过官方 Checkout 流程自助开通 ChatGPT 订阅，兑换卡密后粘贴 Session 即可继续。</p>
+            <div class="hero-eyebrow">FISH GPT · 自助订阅</div>
+            <h1 id="recharge-title">ChatGPT 订阅<br><span class="shine-text">从这里开始。</span></h1>
+            <p class="hero-subtitle">一张卡密，几步操作。验证后确认套餐，提交 Session，即可继续开通。</p>
+            <div class="hero-actions">
+                <a class="landing-button" href="#recharge" data-focus-recharge>开始兑换 <i data-lucide="arrow-right" aria-hidden="true"></i></a>
+                <a class="landing-text-link" href="#plans" data-open-plans>了解支持套餐 <i data-lucide="arrow-down-right" aria-hidden="true"></i></a>
+            </div>
             <div class="feature-badges">
                 <span class="feature-badge"><i data-lucide="shield-check"></i> 官方结账</span>
                 <span class="feature-badge"><i data-lucide="zap"></i> 极速开通</span>
                 <span class="feature-badge"><i data-lucide="rotate-ccw"></i> 失败可回滚</span>
-                <a href="/subscription" class="feature-badge feature-link"><i data-lucide="receipt"></i> 发票助手</a>
+                <a href="/subscription" class="feature-badge feature-link" aria-label="打开发票助手，查询订阅与发票">
+                    <i data-lucide="receipt" aria-hidden="true"></i>
+                    <span>发票助手</span>
+                    <span class="feature-link-hint">点击进入</span>
+                    <i data-lucide="arrow-right" aria-hidden="true"></i>
+                </a>
             </div>
         </header>
-
-        <section class="plan-showcase" aria-label="支持的订阅套餐">
-            <article class="plan-card" data-plan-type="go">
-                <div class="plan-card-head">
-                    <h3>ChatGPT Go</h3>
-                    <span class="plan-tag">Go</span>
-                </div>
-                <p>使用 Go 套餐卡密开通；实际权益和可用性以订阅页面为准。</p>
-            </article>
-            <article class="plan-card" data-plan-type="plus">
-                <div class="plan-card-head">
-                    <h3>ChatGPT Plus</h3>
-                    <span class="plan-tag">标准版</span>
-                </div>
-                <p>使用 Plus 套餐卡密开通；实际权益和可用性以订阅页面为准。</p>
-            </article>
-            <article class="plan-card highlight" data-plan-type="pro_10x">
-                <div class="plan-card-head">
-                    <h3>ChatGPT Pro 10X</h3>
-                    <span class="plan-tag pro">Pro</span>
-                </div>
-                <p>使用 Pro 10X 套餐卡密开通；实际权益以订阅页面为准。</p>
-            </article>
-            <article class="plan-card" data-plan-type="pro_20x">
-                <div class="plan-card-head">
-                    <h3>ChatGPT Pro 20X</h3>
-                    <span class="plan-tag pro">Pro</span>
-                </div>
-                <p>使用 Pro 20X 套餐卡密开通；实际权益以订阅页面为准。</p>
-            </article>
-            <article class="plan-card" data-plan-type="pro_50x">
-                <div class="plan-card-head">
-                    <h3>ChatGPT Pro 50X</h3>
-                    <span class="plan-tag pro">Pro</span>
-                </div>
-                <p>使用 Pro 50X 套餐卡密开通；实际权益以订阅页面为准。</p>
-            </article>
-        </section>
-        <main class="recharge-card">
+        <div class="checkout-visual">
+            <div class="checkout-glow checkout-glow-purple" aria-hidden="true"></div>
+            <div class="checkout-glow checkout-glow-blue" aria-hidden="true"></div>
+            <div class="floating-note" aria-hidden="true">
+                <span class="floating-note-icon"><i data-lucide="sparkles"></i></span>
+                <span><small>从卡密开始</small><strong>套餐自动识别</strong></span>
+            </div>
+        <main class="recharge-card" id="recharge" aria-label="卡密兑换与状态查询">
             <div class="card-head">
                 <div>
                     <h2>卡密兑换</h2>
@@ -140,8 +150,59 @@
             </div>
             <div id="statusMessage" class="status-message"></div>
         </main>
-
-        <details class="faq-panel">
+        </div>
+        <details class="plan-disclosure" id="plans">
+            <summary class="plan-summary">
+                <span class="plan-summary-copy">
+                    <span class="plan-summary-label">支持套餐</span>
+                    <span class="plan-summary-names">Go · Plus · <span>Pro 10X</span> · <span>Pro 20X</span> · <span>Pro 50X</span></span>
+                </span>
+                <span class="plan-toggle">
+                    <span class="when-closed">展开</span>
+                    <span class="when-open">收起</span>
+                    <i data-lucide="chevron-down" aria-hidden="true"></i>
+                </span>
+            </summary>
+            <section class="plan-showcase" aria-label="支持的订阅套餐">
+                <article class="plan-card" data-plan-type="go">
+                    <div class="plan-card-head">
+                        <h3>ChatGPT Go</h3>
+                        <span class="plan-tag">Go</span>
+                    </div>
+                    <p>使用 Go 套餐卡密开通；实际权益和可用性以订阅页面为准。</p>
+                </article>
+                <article class="plan-card" data-plan-type="plus">
+                    <div class="plan-card-head">
+                        <h3>ChatGPT Plus</h3>
+                        <span class="plan-tag">标准版</span>
+                    </div>
+                    <p>使用 Plus 套餐卡密开通；实际权益和可用性以订阅页面为准。</p>
+                </article>
+                <article class="plan-card highlight" data-plan-type="pro_10x">
+                    <div class="plan-card-head">
+                        <h3>ChatGPT Pro 10X</h3>
+                        <span class="plan-tag pro">Pro</span>
+                    </div>
+                    <p>使用 Pro 10X 套餐卡密开通；实际权益以订阅页面为准。</p>
+                </article>
+                <article class="plan-card" data-plan-type="pro_20x">
+                    <div class="plan-card-head">
+                        <h3>ChatGPT Pro 20X</h3>
+                        <span class="plan-tag pro">Pro</span>
+                    </div>
+                    <p>使用 Pro 20X 套餐卡密开通；实际权益以订阅页面为准。</p>
+                </article>
+                <article class="plan-card" data-plan-type="pro_50x">
+                    <div class="plan-card-head">
+                        <h3>ChatGPT Pro 50X</h3>
+                        <span class="plan-tag pro">Pro</span>
+                    </div>
+                    <p>使用 Pro 50X 套餐卡密开通；实际权益以订阅页面为准。</p>
+                </article>
+            </section>
+        </details>
+        </section>
+        <details class="faq-panel" id="faq" data-reveal>
             <summary>常见问题 / 安全说明</summary>
             <ul>
                 <li>Session 仅用于本次官方结账，不会保存您的账号密码。</li>
@@ -149,7 +210,10 @@
                 <li>若长时间停留在「开通中」，可在「查询状态」查看进度。</li>
             </ul>
         </details>
-
+        <footer class="landing-footer" data-reveal>
+            <span>FISH GPT<span class="footer-dot">·</span>自助订阅服务</span>
+            <a href="/subscription">订阅查询与发票 <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
+        </footer>
     </div>
 
     <script>
@@ -802,6 +866,7 @@
         updateFlowUI(1, 'pending');
         lucide.createIcons();
     </script>
+    <script src="/recharge-ui.js" defer></script>
 </body>
 
 </html>

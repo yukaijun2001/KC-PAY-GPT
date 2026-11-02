@@ -1083,6 +1083,108 @@ button.is-loading .btn-text {
 }
 
 /* ============ 套餐说明 / 发票助手 ============ */
+.plan-disclosure {
+    margin-bottom: 20px;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+}
+
+.plan-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 58px;
+    padding: 14px 16px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    list-style: none;
+}
+
+.plan-summary::-webkit-details-marker {
+    display: none;
+}
+
+.plan-summary-copy {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+.plan-summary-label {
+    flex-shrink: 0;
+    color: var(--text-dim);
+    font-size: 12px;
+}
+
+.plan-summary-names {
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.7;
+}
+
+.plan-summary-names span {
+    white-space: nowrap;
+}
+
+.plan-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+    color: var(--primary);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.plan-toggle svg {
+    width: 15px;
+    height: 15px;
+    transition: transform 180ms ease;
+}
+
+.plan-toggle .when-open,
+.plan-disclosure[open] .when-closed {
+    display: none;
+}
+
+.plan-disclosure[open] .when-open {
+    display: inline;
+}
+
+.plan-disclosure[open] .plan-toggle svg {
+    transform: rotate(180deg);
+}
+
+.plan-summary:hover .plan-toggle {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.plan-summary:focus-visible,
+.feature-badge.feature-link:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+}
+
+.plan-disclosure .plan-showcase {
+    margin-bottom: 0;
+    padding: 0 14px 14px;
+}
+
+.plan-disclosure[open] .plan-showcase {
+    animation: plan-reveal 180ms ease-out;
+}
+
+@keyframes plan-reveal {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 .plan-showcase {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
@@ -1140,13 +1242,34 @@ button.is-loading .btn-text {
 
 .feature-badge.feature-link {
     text-decoration: none;
-    color: var(--text-secondary);
-    transition: border-color 0.2s, color 0.2s;
+    color: var(--primary);
+    background: var(--primary-soft);
+    border-color: #bfdbfe;
+    transition: border-color 0.2s, background 0.2s;
 }
 
 .feature-badge.feature-link:hover {
     color: var(--primary);
-    border-color: #bfdbfe;
+    border-color: var(--primary);
+    background: var(--surface);
+}
+
+.feature-link-hint {
+    margin-left: 2px;
+    padding-left: 8px;
+    border-left: 1px solid #bfdbfe;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.feature-badge.feature-link svg:last-child {
+    width: 14px;
+    height: 14px;
+    transition: transform 180ms ease;
+}
+
+.feature-badge.feature-link:hover svg:last-child {
+    transform: translateX(2px);
 }
 
 .plan-confirmed {
@@ -1305,7 +1428,35 @@ button.is-loading .loader {
 }
 
 @media (max-width: 500px) {
+    .plan-summary {
+        padding: 12px 14px;
+        gap: 10px;
+    }
+
+    .plan-summary-copy {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+    }
+
+    .plan-summary-names {
+        font-size: 12px;
+    }
+
     .plan-showcase {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .recharge-page .page-shell,
+    .plan-disclosure[open] .plan-showcase {
+        animation: none;
+    }
+
+    .plan-toggle svg,
+    .feature-badge.feature-link,
+    .feature-badge.feature-link svg:last-child {
+        transition: none;
     }
 }
