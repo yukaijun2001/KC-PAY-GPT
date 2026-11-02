@@ -136,3 +136,37 @@ npm test
 - 该成功样本还出现 `checkout_appearance=light`、`checkout_source=chatgpt_web_merged` 和其他可选字段。由于没有对应失败请求，不能证明它们为风控拦截原因，也没有据此强行改写套餐、地区或支付相关配置。
 
 本地测试能复现并覆盖账号头缺失和脱敏诊断，但无法重现上游风控。部署到实际环境后，应查看最终状态以及脱敏的 `[Checkout] 请求上下文`；出现 API 失败日志并不必然代表自动 UI 回退也失败。
+
+## 2026-11-02：精简套餐页展开与 Pro 数字档位选择
+
+用户提供的页面截图显示，初始 Personal 视图可能仅显示 Free / Plus，点击 `See all plans` 才会显示 Go / Pro。Pro 的三个档位共用 `Upgrade to Pro` 按钮，档位由数字 radio 控制：
+
+| 本地套餐 | radio 名称 | 请求 plan_name |
+| --- | --- | --- |
+| pro_10x | 100 | chatgptprolite |
+| pro_20x | 200 | chatgptpro |
+| pro_50x | 500 | chatgptpromax |
+
+- `src/checkout/pricing-checkout.js`：Go / Pro 共用展开和异步等待；不依赖易变的 CSS 类名。
+- 通用 Pro 升级按钮必须唯一，并在其最近的独立 Pro 卡片内精确定位档位。点击 radio 后等待 `aria-checked=true`，兼容异步卡片重绘。缺档、重复、禁用或选中状态未更新时停止，不尝试默认档位或其他套餐。
+- 保留已有的明确标注 `Pro 10X / 20X / 50X` 的专属按钮路径；不恢复 Pro 5X。
+- 创建请求继续校验 `plan_name / country / currency`，不通过改写请求来掩盖页面选错档位。
+
+```mermaid
+flowchart TD
+    A[进入 Personal 定价页] --> B{目标套餐已显示?}
+    B -->|否| C[See all plans 并等待加载]
+    B -->|是| D{Pro 通用按钮?}
+    C --> D
+    D -->|是| E[独立 Pro 卡片内选择 100 / 200 / 500]
+    E --> F{目标 radio 唯一且 checked=true?}
+    F -->|否| X[停止创建，不使用默认档位]
+    F -->|是| G[点击 Upgrade to Pro]
+    D -->|否| H[点击明确套餐按钮]
+    G --> I[既有请求套餐与地区校验]
+    H --> I
+```
+
+验证：新增的三个档位测试在修复前均复现了“直接点击当前档位”，修复后通过。真实 Chromium 的本地 DOM 测试还覆盖精简页展开、延迟 radio、整卡重绘、已选中、缺档、禁用、状态未更新、重复卡片及卡片外数字干扰。`npm test -- --reporter=dot --silent`：19 个文件、207 项测试通过；语法检查和 `git diff --check` 通过。
+
+本轮未访问真实订阅页、未创建真实 Checkout、未付款；没有修改 Sentinel 超时处理。本地选择器验证不代表线上风控已解决，也不代表代码已推送或部署。

@@ -48,8 +48,7 @@ const SKIP_REGION_BUTTON_TEXT = /^(Upgrade|Personal|Business|Free|Plus|Pro|Subsc
 function proUpgradePatterns(multiplier) {
     return [
         new RegExp(`升级(?:至|到)\\s*(?:ChatGPT\\s*)?Pro\\s*${multiplier}\\s*x\\b`, 'i'),
-        new RegExp(`(?:Upgrade to|Get|Subscribe to)\\s*(?:ChatGPT\\s*)?Pro\\s*${multiplier}\\s*x\\b`, 'i'),
-        /升级至\s*Pro/i, /Upgrade to Pro/i, /Get Pro/i, /^Upgrade$/i
+        new RegExp(`(?:Upgrade to|Get|Subscribe to)\\s*(?:ChatGPT\\s*)?Pro\\s*${multiplier}\\s*x\\b`, 'i')
     ];
 }
 
@@ -60,6 +59,13 @@ const PLAN_UPGRADE_PATTERNS = {
     pro_20x: proUpgradePatterns(20),
     pro_50x: proUpgradePatterns(50)
 };
+
+const GO_UPGRADE_BUTTON = /升级至\s*(?:ChatGPT\s*)?Go\b|(?:Upgrade to|Get|Subscribe to)\s*(?:ChatGPT\s*)?Go\b/i;
+const PRO_UPGRADE_BUTTON = /升级(?:至|到)\s*(?:ChatGPT\s*)?Pro\b|(?:Upgrade to|Get|Subscribe to)\s*(?:ChatGPT\s*)?Pro\b/i;
+const PRO_GENERIC_UPGRADE_BUTTON = /^(?:升级(?:至|到)\s*(?:ChatGPT\s*)?Pro|(?:Upgrade to|Get|Subscribe to)\s*(?:ChatGPT\s*)?Pro)$/i;
+const PRO_TIER_VALUES = Object.freeze({ pro_10x: '100', pro_20x: '200', pro_50x: '500' });
+const PRO_TIER_LABEL = /^(?:100|200|500)$/;
+const SEE_ALL_PLANS = /^(?:See all plans|View all plans|Show all plans|查看(?:全部|所有)套餐|显示(?:全部|所有)套餐|查看(?:全部|所有)方案)$/i;
 
 function normalizeOptionText(text) {
     return String(text || '').replace(/\s+/g, ' ').trim();
@@ -645,9 +651,92 @@ async function selectPricingRegion(page, regionCode) {
     throw new Error(`无法将定价页切换到目标地区 ${code}（${regionConfig?.label || code}），请检查后台支付地区设置。当前页面: ${finalText}`);
 }
 
-/**
- * 点击对应套餐的升级按钮
- */
+/** 展开精简定价视图，并等待目标套餐按钮异步出现。 */
+async function preparePlanView(page, buttonPattern, label) {
+    const upgradeButton = page.getByRole('button', { name: buttonPattern }).first();
+    const deadline = Date.now() + 8000;
+
+    // The initial Personal view may contain only Free and Plus. Other plans can be
+    // inserted asynchronously after the "See all plans" control is clicked.
+    // isVisible() itself does not wait, so poll for either condition explicitly.
+    while (Date.now() < deadline) {
+        if (await upgradeButton.isVisible().catch(() => false)) return 'visible';
+
+        const expandCandidates = [
+            () => page.getByRole('link', { name: SEE_ALL_PLANS }).first(),
+            () => page.getByRole('button', { name: SEE_ALL_PLANS }).first(),
+            () => page.getByText(SEE_ALL_PLANS).first()
+        ];
+        for (const getCandidate of expandCandidates) {
+            try {
+                const candidate = getCandidate();
+                if (!await candidate.isVisible()) continue;
+                await candidate.scrollIntoViewIfNeeded().catch(() => {});
+                await candidate.click({ timeout: 5000 });
+                console.log(`✅ [步骤] 已展开全部套餐，等待 ${label} 套餐加载`);
+                await upgradeButton.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
+                return 'expanded';
+            } catch (_) { /* try another exact expansion control */ }
+        }
+        await page.waitForTimeout(250);
+    }
+    return 'unavailable';
+}
+
+/** 通用 Pro 按钮不代表档位，必须先在同一卡片内选中并确认数字 radio。 */
+async function clickProPlanUpgrade(page, plan) {
+    // Older views may expose a dedicated button whose name already specifies X.
+    for (const pattern of PLAN_UPGRADE_PATTERNS[plan]) {
+        const button = page.getByRole('button', { name: pattern }).first();
+        if (!await button.isVisible().catch(() => false)) continue;
+        await button.scrollIntoViewIfNeeded();
+        await button.click({ timeout: 10000 });
+        console.log(`✅ [步骤] 已点击 ${plan} 专属升级按钮`);
+        return;
+    }
+
+    const tier = PRO_TIER_VALUES[plan];
+    const upgradeButtons = page.getByRole('button', { name: PRO_GENERIC_UPGRADE_BUTTON });
+    if (await upgradeButtons.count() !== 1) {
+        throw new Error(`无法唯一定位 ${plan} 的 Pro 升级按钮，已停止创建`);
+    }
+
+    // Start at the button and take its nearest Pro-labelled card. Never broaden
+    // the search to page-wide numeric radios or a Free/Plus/Go ancestor container.
+    const card = upgradeButtons.locator('xpath=ancestor::*[self::div or self::section or self::article][.//*[normalize-space(.)="Pro" or normalize-space(.)="ChatGPT Pro"]][1]');
+    if (await card.count() !== 1
+        || await card.getByRole('button', { name: /(?:Upgrade to|Get|Subscribe to|升级至)\s*(?:ChatGPT\s*)?(?:Go|Plus)\b/i }).count() > 0) {
+        throw new Error(`无法定位独立 Pro 套餐卡片，未选择 ${plan}（已停止创建）`);
+    }
+
+    const radio = card.getByRole('radio', { name: tier, exact: true });
+    try {
+        await radio.waitFor({ state: 'visible', timeout: 5000 });
+        if (await radio.count() !== 1) throw new Error('目标档位不唯一');
+        if (await radio.isDisabled()) throw new Error('目标档位已禁用');
+        if (await radio.getAttribute('aria-checked') !== 'true') {
+            await radio.scrollIntoViewIfNeeded();
+            await radio.click({ timeout: 5000 });
+        }
+        // React may replace the entire card after the click; locator-based waits
+        // re-resolve the selected radio rather than holding a stale element handle.
+        await card.getByRole('radio', { name: tier, exact: true, checked: true })
+            .waitFor({ state: 'visible', timeout: 5000 });
+        if (await radio.getAttribute('aria-checked') !== 'true'
+            || await card.getByRole('radio', { name: PRO_TIER_LABEL, checked: true }).count() !== 1) {
+            throw new Error('无法确认唯一选中档位');
+        }
+    } catch (_) {
+        throw new Error(`无法选中或确认 Pro ${tier} 档位（${plan}），已停止创建，不使用默认档位`);
+    }
+
+    console.log(`✅ [步骤] 已确认 Pro 档位: ${plan} → ${tier} (aria-checked=true)`);
+    const button = card.getByRole('button', { name: PRO_GENERIC_UPGRADE_BUTTON });
+    await button.click({ timeout: 10000 });
+    console.log(`✅ [步骤] 已点击 Pro 升级按钮 (档位: ${tier})`);
+}
+
+/** 点击对应套餐的升级按钮。 */
 async function clickPlanUpgrade(page, planType) {
     const plan = normalizePlanType(planType);
     if (!plan) throw new Error(`不支持的套餐类型: ${String(planType)}`);
@@ -657,6 +746,12 @@ async function clickPlanUpgrade(page, planType) {
     await assertChatGptLoggedIn(page, '升级前');
     await switchToPersonalPlans(page);
     await page.waitForTimeout(1000);
+    if (PRO_TIER_VALUES[plan]) {
+        await preparePlanView(page, PRO_UPGRADE_BUTTON, 'Pro');
+        await clickProPlanUpgrade(page, plan);
+        return;
+    }
+    const goView = plan === 'go' ? await preparePlanView(page, GO_UPGRADE_BUTTON, 'Go') : '';
 
     for (const pattern of patterns) {
         try {
@@ -670,10 +765,12 @@ async function clickPlanUpgrade(page, planType) {
         } catch (_) { /* try next */ }
     }
 
-    const cardTitle = plan === 'go' ? /ChatGPT Go|^Go$/i : (plan === 'plus' ? /ChatGPT Plus/i : /ChatGPT Pro/i);
+    const cardTitle = plan === 'go' ? /ChatGPT Go|^Go$/i : /ChatGPT Plus/i;
     try {
         const card = page.locator('div').filter({ hasText: cardTitle }).filter({ has: page.getByRole('button') }).first();
-        const btn = card.getByRole('button').filter({ hasText: /升级|Upgrade|Subscribe|Get/i }).first();
+        const btn = card.getByRole('button').filter({
+            hasText: plan === 'go' ? GO_UPGRADE_BUTTON : /升级|Upgrade|Subscribe|Get/i
+        }).first();
         if (await btn.isVisible({ timeout: 3000 })) {
             await btn.scrollIntoViewIfNeeded().catch(() => {});
             await btn.click({ timeout: 10000 });
@@ -701,20 +798,13 @@ async function clickPlanUpgrade(page, planType) {
         ? [
             'button:has-text("升级至 Go")',
             'button:has-text("Upgrade to Go")',
-            'button:has-text("Get Go")',
-            'text=ChatGPT Go >> xpath=ancestor::div[.//button[contains(., "Upgrade") or contains(., "升级")]][1] >> button'
+            'button:has-text("Get Go")'
         ]
-        : plan === 'plus'
-        ? [
+        : [
             'button:has-text("升级至 Plus")',
             'button:has-text("Upgrade to Plus")',
             '[role="dialog"] >> text=ChatGPT Plus >> .. >> .. >> button:has-text("Upgrade")',
             'text=ChatGPT Plus >> xpath=ancestor::div[.//button[contains(., "Upgrade") or contains(., "升级")]][1] >> button'
-        ]
-        : [
-            'button:has-text("升级至 Pro")',
-            'button:has-text("Upgrade to Pro")',
-            'text=ChatGPT Pro >> xpath=ancestor::div[.//button[contains(., "Upgrade") or contains(., "升级")]][1] >> button'
         ];
 
     for (const sel of fallbackSelectors) {
@@ -738,6 +828,9 @@ async function clickPlanUpgrade(page, planType) {
         throw new Error(`定价页仍在 Business 视图，未找到 ${plan} 套餐；请确认账号可升级 Plus/Pro`);
     }
 
+    if (plan === 'go' && goView === 'expanded') {
+        throw new Error('已展开全部套餐，但未找到或无法点击 Go 升级按钮，请检查账号、地区和页面加载状态');
+    }
     throw new Error(`未找到 ${plan} 套餐的升级按钮，请确认账号可升级且 Session 已登录`);
 }
 

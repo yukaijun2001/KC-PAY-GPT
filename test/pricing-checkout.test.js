@@ -7,6 +7,20 @@ const vm = require('vm');
 const { createRequire } = require('module');
 
 describe('UI Checkout plan/region guard', () => {
+    it.each([
+        ['pro_10x', 'chatgptprolite'],
+        ['pro_20x', 'chatgptpro'],
+        ['pro_50x', 'chatgptpromax']
+    ])('only accepts the matching Pro plan_name for %s', (planType, expectedPlan) => {
+        for (const planName of ['chatgptprolite', 'chatgptpro', 'chatgptpromax']) {
+            const result = validateUiCheckoutPayload({
+                plan_name: planName, billing_details: { country: 'PH', currency: 'PHP' }
+            }, { planType, region: 'PH' });
+            if (planName === expectedPlan) expect(result).toBe('');
+            else expect(result).toContain(expectedPlan);
+        }
+    });
+
     it('accepts the selected plan, billing region and currency', () => {
         expect(validateUiCheckoutPayload({
             plan_name: 'chatgptplusplan', billing_details: { country: 'PH', currency: 'PHP' }
@@ -35,6 +49,15 @@ describe('UI Checkout plan/region guard', () => {
         expect(validateUiCheckoutPayload({
             plan_name: 'chatgptplusplan', billing_details: { country: 'US', currency: 'USD' }
         }, { planType: 'plus', region: 'PH' })).toContain('PH/PHP');
+    });
+
+    it('rejects a Plus request or wrong region when Go was requested', () => {
+        expect(validateUiCheckoutPayload({
+            plan_name: 'chatgptplusplan', billing_details: { country: 'PH', currency: 'PHP' }
+        }, { planType: 'go', region: 'PH' })).toContain('chatgptgoplan');
+        expect(validateUiCheckoutPayload({
+            plan_name: 'chatgptgoplan', billing_details: { country: 'US', currency: 'USD' }
+        }, { planType: 'go', region: 'PH' })).toContain('PH/PHP');
     });
 
     it('waits for asynchronous error details before reporting failure', async () => {
