@@ -244,11 +244,12 @@ describe.skipIf(!browserAvailable)('public recharge page in Chromium (mocked bac
     });
 
     it('focuses the current query input from the header action without resetting the tab', async () => {
-        const { context, page, errors } = await openPage({ reducedMotion: 'reduce' });
+        const { context, page, errors } = await openPage({ reducedMotion: 'reduce', viewport: { width: 390, height: 844 } });
         try {
             await page.locator('[data-tab="query"]').click();
             await page.locator('#queryInput').fill('TEST-QUERY-INPUT');
-            await page.locator('.landing-nav-cta').click();
+            await page.locator('#landing_menu_toggle').click();
+            await page.locator('#landing_nav_dialog [data-focus-recharge]').click();
             await page.waitForFunction(() => document.activeElement === document.getElementById('queryInput'));
             expect(await page.locator('#queryInput').inputValue()).toBe('TEST-QUERY-INPUT');
             expect(await page.locator('#querySection').isVisible()).toBe(true);
