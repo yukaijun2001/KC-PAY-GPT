@@ -2,7 +2,7 @@
  * 将后台 DB 中的 hCaptcha 配置转为子进程 / solver 可用的环境变量
  */
 
-const path = require('path');
+const { projectPath } = require('../project-paths');
 
 const DEFAULT_VLM_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_VLM_MODEL = 'gpt-5.5';
@@ -50,7 +50,7 @@ function buildHcaptchaEnvFromConfig(cfg = {}) {
         CDP_PORT: normalized.cdp_port,
         CDP_URL: cdpUrl,
         HCAPTCHA_SOLVER_SCRIPT: process.env.HCAPTCHA_SOLVER_SCRIPT
-            || path.join(__dirname, 'hcaptcha', 'solver.py'),
+            || projectPath('hcaptcha', 'solver.py'),
         HCAPTCHA_SOLVER_PYTHON: resolveSolverPython(),
         HCAPTCHA_SOLVER_OUT_DIR: process.env.HCAPTCHA_SOLVER_OUT_DIR || '/tmp/hcaptcha_auto_solver_live',
         HCAPTCHA_CAPTCHA_PLATFORM_API_KEY: normalized.captcha_platform_api_key,

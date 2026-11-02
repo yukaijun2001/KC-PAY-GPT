@@ -2,8 +2,8 @@
 
 const axios = require('axios');
 const { request: playwrightRequest } = require('playwright');
-const { extractProfileFromToken } = require('./session-auth');
-const { preparePlaywrightProxy } = require('./playwright-proxy');
+const { extractProfileFromToken } = require('../browser/session-auth');
+const { preparePlaywrightProxy } = require('../browser/playwright-proxy');
 
 const CHECK_V4_BASE = 'https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27';
 const CANCEL_SUBSCRIPTION_URL = 'https://chatgpt.com/backend-api/subscriptions/cancel';

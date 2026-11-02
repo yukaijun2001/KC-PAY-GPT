@@ -12,6 +12,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { projectPath } = require('../project-paths');
 const {
     isHumanVerificationVisible,
     clearHumanVerification,
@@ -19,7 +20,7 @@ const {
     hasCheckoutCaptchaOverlayText,
     isCheckoutOverlayCaptchaVisible,
     hasAnyCheckoutCaptchaSignal
-} = require('./human-verification');
+} = require('../captcha/human-verification');
 
 // ==================== Helper Functions ====================
 
@@ -99,7 +100,7 @@ async function humanTypeInFrame(frame, selector, text) {
  */
 async function saveDebugScreenshot(page, prefix) {
     try {
-        const screenshotDir = path.join(__dirname, 'debug_screenshots', 'stripe');
+        const screenshotDir = projectPath('debug_screenshots', 'stripe');
         fs.mkdirSync(screenshotDir, { recursive: true });
         const filePath = path.join(screenshotDir, `${prefix}_${Date.now()}.png`);
         const shotOpts = { path: filePath, animations: 'disabled', timeout: 8000 };

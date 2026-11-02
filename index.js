@@ -1,11 +1,11 @@
-const { executePaymentWithRetry } = require('./payment-retry');
-const { openPricingCheckout } = require('./pricing-checkout');
-const { openApiCheckout } = require('./chatgpt');
-const store = require('./mysql-store');
-const { getRegionConfig, getRegionBrowserProfile } = require('./region-config');
-const { installChatGptSession, bootstrapChatGptSession } = require('./session-auth');
-const { connectTaskBrowser, applyCdpEnv, closeTaskBrowser } = require('./browser-runtime');
-const { preparePlaywrightProxy } = require('./playwright-proxy');
+const { executePaymentWithRetry } = require('./src/payments/payment-retry');
+const { openPricingCheckout } = require('./src/checkout/pricing-checkout');
+const { openApiCheckout } = require('./src/checkout/chatgpt');
+const store = require('./src/persistence/mysql-store');
+const { getRegionConfig, getRegionBrowserProfile } = require('./src/config/region-config');
+const { installChatGptSession, bootstrapChatGptSession } = require('./src/browser/session-auth');
+const { connectTaskBrowser, applyCdpEnv, closeTaskBrowser } = require('./src/browser/browser-runtime');
+const { preparePlaywrightProxy } = require('./src/browser/playwright-proxy');
 const fs = require('fs');
 const path = require('path');
 

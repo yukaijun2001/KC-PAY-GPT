@@ -52,6 +52,18 @@ docker compose up -d
 示例 `.env` 的访问地址：`http://your-server-ip:28080/admin-login`。
 如果没有设置 `PORT`，Compose 默认使用宿主机 3100；容器内始终使用 3000，具体映射以 `docker compose ps` 为准。后台入口可以在后台修改，`/admin-login.html` 不提供访问。
 
+#### 从旧目录结构升级
+
+内部模块已整理到 `src/`，启动入口仍为 `server.js` 和 `index.js`。同步新代码后需要重新创建 app 容器，使其使用新的目录挂载：
+
+```bash
+docker compose up -d --build --no-deps --force-recreate app
+docker compose ps
+docker compose logs --tail=80 app
+```
+
+此操作不重建 MySQL，也不删除数据卷。保留原有 `.env`、`data/`、`debug_screenshots/` 和 `product_files/`；不要执行数据库重置脚本。MySQL 初始化文件继续使用根目录的 `mysql-schema.sql`，兼容已有挂载。
+
 ### 4. 常用命令
 
 ```bash

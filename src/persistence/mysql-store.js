@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { projectPath } = require('../project-paths');
 const crypto = require('crypto');
 const mysql = require('mysql2/promise');
 const {
@@ -8,8 +9,8 @@ const {
     parseProxyMeta,
     normalizeProxyLines,
     maskProxyUrl
-} = require('./proxy-pool');
-const { normalizeCaptchaPlatformApiUrl, DEFAULT_API_URL: CAPTCHA_PLATFORM_DEFAULT_URL, resolveCaptchaPlatformCredentials } = require('./captcha-platform');
+} = require('../proxy/proxy-pool');
+const { normalizeCaptchaPlatformApiUrl, DEFAULT_API_URL: CAPTCHA_PLATFORM_DEFAULT_URL, resolveCaptchaPlatformCredentials } = require('../captcha/captcha-platform');
 
 const DB_HOST = process.env.DB_HOST || '127.0.0.1';
 const DB_PORT = Number(process.env.DB_PORT || 3306);
@@ -17,13 +18,13 @@ const DB_NAME = process.env.DB_NAME || 'gpt';
 const DB_USER = process.env.DB_USER || 'root';
 const DB_PASSWORD = process.env.DB_PASSWORD || '';
 
-const SCHEMA_PATH = path.join(__dirname, 'mysql-schema.sql');
+const SCHEMA_PATH = projectPath('mysql-schema.sql');
 const DEFAULT_ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || 'admin@vru.cc').trim().toLowerCase();
 const DEFAULT_ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'admin123');
 const DEFAULT_ADMIN_SECONDARY_PASSWORD = String(process.env.ADMIN_SECONDARY_PASSWORD || 'admin123');
 const DEFAULT_ADMIN_LOGIN_PATH = String(process.env.ADMIN_LOGIN_PATH || 'admin-login').trim().toLowerCase();
 const DEFAULT_ADMIN_PANEL_PATH = String(process.env.ADMIN_PANEL_PATH || 'admin').trim().toLowerCase();
-const { normalizeAdminPaths } = require('./admin-paths');
+const { normalizeAdminPaths } = require('../admin/admin-paths');
 
 let pool = null;
 
@@ -736,7 +737,7 @@ function deleteTaskMediaFiles(row = {}) {
         ...fromOutput.videos
     ])];
 
-    const root = path.join(__dirname, 'debug_screenshots');
+    const root = projectPath('debug_screenshots');
     let deleted = 0;
     for (const rel of relPaths) {
         const normalized = String(rel || '').replace(/\\/g, '/').replace(/^\/+/, '');
@@ -2061,7 +2062,7 @@ async function getTelegramConfig() {
 const DEFAULT_HCAPTCHA_VLM_MODEL = 'gpt-5.5';
 
 function resolveHcaptchaConfigFilePath() {
-    return String(process.env.HCAPTCHA_CONFIG_FILE || path.join(__dirname, 'data', 'hcaptcha-config.json')).trim();
+    return String(process.env.HCAPTCHA_CONFIG_FILE || projectPath('data', 'hcaptcha-config.json')).trim();
 }
 
 function readHcaptchaConfigFile(filePath = resolveHcaptchaConfigFilePath()) {
@@ -3168,7 +3169,7 @@ async function bindCardPaymentProfile(cardId, profile = {}) {
 
 // ─── Card Import ─────────────────────────────────────────────────────────────
 
-const { validateCard } = require('./card-validator');
+const { validateCard } = require('../payments/card-validator');
 
 /**
  * 批量导入信用卡（含格式验证 + 去重）。
@@ -3277,7 +3278,7 @@ async function importCards(cards) {
 
 // ─── Region Selector ────────────────────────────────────────────────────────
 
-const { SUPPORTED_REGIONS, DEFAULT_REGION } = require('./region-config');
+const { SUPPORTED_REGIONS, DEFAULT_REGION } = require('../config/region-config');
 
 /**
  * 获取当前支付地区代码

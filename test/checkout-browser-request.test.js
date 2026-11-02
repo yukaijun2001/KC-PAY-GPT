@@ -1,7 +1,7 @@
 'use strict';
 
 const vm = require('vm');
-const { openApiCheckout } = require('../chatgpt');
+const { openApiCheckout } = require('../src/checkout/chatgpt');
 
 function browserPage({ sdk, fetchResponse, appendScript, url = 'https://chatgpt.com/' } = {}) {
     const fetch = vi.fn(async () => fetchResponse || {

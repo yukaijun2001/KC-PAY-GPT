@@ -44,6 +44,25 @@ describe('Docker host port configuration', () => {
         expect(String(config.services.app.ports[0].published)).toBe('28080');
         expect(Number(config.services.app.ports[0].target)).toBe(3000);
     });
+
+    composeTest('mounts the organized source and database schema without changing data volumes', () => {
+        const config = resolvedCompose();
+        const appVolumes = config.services.app.volumes;
+        expect(appVolumes).toContainEqual(expect.objectContaining({
+            type: 'bind', source: path.join(root, 'src'), target: '/app/src', read_only: true
+        }));
+        expect(appVolumes).toContainEqual(expect.objectContaining({
+            type: 'bind', source: path.join(root, 'data'), target: '/app/data'
+        }));
+        expect(config.services.mysql.volumes).toContainEqual(expect.objectContaining({
+            type: 'bind', source: path.join(root, 'mysql-schema.sql'),
+            target: '/docker-entrypoint-initdb.d/01-schema.sql', read_only: true
+        }));
+        expect(config.services.mysql.volumes).toContainEqual(expect.objectContaining({
+            type: 'volume', source: 'mysql_data', target: '/var/lib/mysql'
+        }));
+        expect(config.volumes.mysql_data.name).toBe('kc-gpt-pay2_mysql_data');
+    });
 });
 
 describe('default web paths', () => {
@@ -66,7 +85,7 @@ describe('default web paths', () => {
         const module = { exports: {} };
         const context = vm.createContext({
             module, exports: module.exports, __dirname: root, __filename: sourcePath,
-            require: (name) => name === './mysql-store' ? fakeStore : realRequire(name),
+            require: (name) => name === './src/persistence/mysql-store' ? fakeStore : realRequire(name),
             process: fakeProcess, console: { log() {}, warn() {}, error() {} },
             Buffer, URL, URLSearchParams, setTimeout, clearTimeout, setInterval, clearInterval
         });

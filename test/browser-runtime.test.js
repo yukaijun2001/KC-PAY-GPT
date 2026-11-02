@@ -8,7 +8,7 @@ function loadRuntime() {
     const standalone = vi.fn(async (options) => ({ mode: 'standalone', ...options }));
     const pool = vi.fn(async (options) => ({ mode: 'pool', ...options }));
     const module = { exports: {} };
-    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../browser-runtime.js'), 'utf8'), {
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/browser/browser-runtime.js'), 'utf8'), {
         module, process, console,
         require: (name) => ({
             './browser-standalone': { connectStandaloneBrowser: standalone },

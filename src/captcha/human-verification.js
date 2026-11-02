@@ -10,7 +10,7 @@ const {
     injectHcaptchaTokenOnPage,
     clickCheckoutContinueAfterCaptcha
 } = require('./captcha-platform');
-const { isLoginPageContent, isHardLoginRedirectUrl, isCheckoutPageUrl, hasVisibleLoginChrome, isCheckoutLoginGate, buildSessionNotLoggedInError } = require('./auth-page-detect');
+const { isLoginPageContent, isHardLoginRedirectUrl, isCheckoutPageUrl, hasVisibleLoginChrome, isCheckoutLoginGate, buildSessionNotLoggedInError } = require('../browser/auth-page-detect');
 
 const BLOCKING_TEXT_PATTERNS = [
     /one more step before you'?re done/i,

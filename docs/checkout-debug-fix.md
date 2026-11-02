@@ -45,7 +45,7 @@ flowchart TD
 
 ### 请求
 
-- `checkout-browser-request.js`：复用 `https://chatgpt.com` 当前页面；需要时加载站点 SDK。
+- `src/checkout/checkout-browser-request.js`：复用 `https://chatgpt.com` 当前页面；需要时加载站点 SDK。
 - 使用 `init('chatgpt_checkout')` 和 `token('chatgpt_checkout')`。初始化后重新读取 `window.SentinelSDK`，避免调用被替换的 loader stub。
 - 将 token 放入 `openai-sentinel-token`，通过页面 `fetch` 和 `credentials: include` 发送请求。
 - device/account ID 仅取当前 Cookie 或会话，不生成随机值。

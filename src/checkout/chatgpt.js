@@ -1,9 +1,9 @@
 'use strict';
 
 const axios = require('axios');
-const store = require('./mysql-store');
-const { getRegionConfig } = require('./region-config');
-const { executePaymentWithRetry } = require('./payment-retry');
+const store = require('../persistence/mysql-store');
+const { getRegionConfig } = require('../config/region-config');
+const { executePaymentWithRetry } = require('../payments/payment-retry');
 const { requestBrowserCheckout } = require('./checkout-browser-request');
 
 function buildCheckoutPayload(planName, country, currency) {
@@ -364,7 +364,7 @@ async function activateSubscription({ page, accessToken, planType, cdkCode, emai
  * 判断 Checkout 页面是否已正常加载（避免 body 里 incidental "404" 误报）
  */
 async function assertCheckoutPageReady(page) {
-    const { isCloudflareWallPage, isCheckoutPaymentReady } = require('./human-verification');
+    const { isCloudflareWallPage, isCheckoutPaymentReady } = require('../captcha/human-verification');
     const currentUrl = page.url();
     const pageText = String(await page.textContent('body', { timeout: 8000 }).catch(() => '') || '');
     const title = String(await page.title().catch(() => '') || '');
@@ -402,7 +402,7 @@ async function assertCheckoutPageReady(page) {
  * 通过 API 注入 billing_details 创建 Checkout，并打开 chatgpt.com/checkout
  */
 async function openApiCheckout(page, { accessToken, planType, country, currency, planNameOverride, verifyPage = true }) {
-    const { assertChatGptLoggedIn } = require('./session-auth');
+    const { assertChatGptLoggedIn } = require('../browser/session-auth');
     const token = String(accessToken || '').trim();
     if (!token) {
         throw new Error('缺少 AccessToken，无法调用 Checkout API');
@@ -430,14 +430,14 @@ async function openApiCheckout(page, { accessToken, planType, country, currency,
     await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
     await page.waitForTimeout(2000);
 
-    const { hasVisibleLoginChrome, isCheckoutLoginGate, buildSessionNotLoggedInError } = require('./auth-page-detect');
+    const { hasVisibleLoginChrome, isCheckoutLoginGate, buildSessionNotLoggedInError } = require('../browser/auth-page-detect');
     if (await isCheckoutLoginGate(page) || await hasVisibleLoginChrome(page)) {
         const title = await page.title().catch(() => '');
         console.error(`[Checkout] 打开后仍为未登录 UI url=${page.url().slice(0, 100)} title=${title}`);
         throw new Error(buildSessionNotLoggedInError('Checkout 支付页'));
     }
 
-    const { clearHumanVerification, buildCaptchaRequiredError } = require('./human-verification');
+    const { clearHumanVerification, buildCaptchaRequiredError } = require('../captcha/human-verification');
     const captchaResult = await clearHumanVerification(page, {
         phase: 'checkout-open',
         maxWaitMs: Number(process.env.CAPTCHA_CLEAR_TIMEOUT_MS || 120000),

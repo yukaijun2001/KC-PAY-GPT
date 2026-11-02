@@ -1,7 +1,7 @@
 'use strict';
 
 const axios = require('axios');
-const client = require('../gpt-api-client');
+const client = require('../src/integrations/gpt-api-client');
 
 describe('gpt api client', () => {
     afterEach(() => vi.restoreAllMocks());

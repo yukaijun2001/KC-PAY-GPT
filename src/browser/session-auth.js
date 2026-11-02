@@ -641,7 +641,7 @@ async function bootstrapChatGptSession(page, sessionRaw, options = {}) {
     });
     await page.waitForTimeout(2500);
 
-    const { clearHumanVerification } = require('./human-verification');
+    const { clearHumanVerification } = require('../captcha/human-verification');
     const captchaResult = await clearHumanVerification(page, {
         phase: 'session-bootstrap',
         maxWaitMs: Number(process.env.CAPTCHA_CLEAR_TIMEOUT_MS || 180000),

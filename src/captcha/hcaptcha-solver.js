@@ -9,8 +9,9 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { projectPath } = require('../project-paths');
 
-const DEFAULT_SOLVER_SCRIPT = path.join(__dirname, 'hcaptcha', 'solver.py');
+const DEFAULT_SOLVER_SCRIPT = projectPath('hcaptcha', 'solver.py');
 const DEFAULT_OUT_DIR = '/tmp/hcaptcha_auto_solver_live';
 
 function resolveSolverPython() {

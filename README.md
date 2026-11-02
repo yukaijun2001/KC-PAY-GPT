@@ -131,7 +131,7 @@ https://kc.vpss.eu.cc/
 3. 以 `/pay/inspect` 檢查 Session 格式與 JWT 有效期，再以 `/pay` 建立代充訂單。
 4. 輪詢供應商訂單結果；後台僅顯示失敗代充訂單及上游公開的 `topup_code` 前綴，不會保存或展示完整卡密。
 
-API Key 至少需要 `plans:read`、`balance:read`、`pay:write` Scope；如需使用任務查詢，另需 `tasks:read`。完整供應商協議見 [對接 API 文件](对接api.md)。
+API Key 至少需要 `plans:read`、`balance:read`、`pay:write` Scope；如需使用任務查詢，另需 `tasks:read`。完整供應商協議見 [對接 API 文件](docs/对接api.md)。
 
 > 浏览器池未配置时默认启用，可通过 `BROWSER_POOL=0` 关闭；已保存的后台设置优先。第三方代充模式不使用本地浏览器开通流程。
 
@@ -338,13 +338,13 @@ sudo certbot --nginx -d your-domain.com
          │                                    │
          ▼                                    ▼
 ┌─────────────────────┐            ┌─────────────────────┐
-│  product_activator  │            │  public/admin.html  │
+│  子进程任务调度      │            │  public/admin.html  │
 │  任务调度 / 重试     │            │  KC GPT 管理后台     │
 └─────────────────────┘            └─────────────────────┘
          │
          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  index.js / stripe-payment.js / session-auth.js / browser-pool │
+│  index.js / src/payments / src/browser / src/checkout        │
 │  Stripe Checkout 自动化 · Session 鉴权 · 卡池支付 · 重试      │
 └─────────────────────────────────────────────────────────────┘
          │
@@ -360,35 +360,41 @@ sudo certbot --nginx -d your-domain.com
 
 ```
 .
-├── server.js              # Express 入口、REST API
-├── product_activator.js   # 任务调度核心
-├── index.js               # Stripe 支付主流程（子进程）
-├── stripe-payment.js      # Checkout 表单自动化
-├── session-auth.js        # Session 解析与鉴权
-├── browser-pool.js        # 浏览器池管理
-├── mysql-store.js         # MySQL 全部 CRUD
-├── payment-retry.js       # 支付重试与换卡逻辑
-├── region-config.js       # 支付地区配置
+├── server.js              # Web 入口和任务调度
+├── index.js               # 任务子进程入口
+├── src/
+│   ├── admin/             # 后台认证及路径
+│   ├── browser/           # 浏览器池、Session 和代理适配
+│   ├── captcha/           # 验证码相关模块
+│   ├── checkout/          # 套餐和结账流程
+│   ├── config/            # 地区等配置
+│   ├── integrations/      # 第三方 API、通知
+│   ├── payments/          # 支付、卡片及地址模块
+│   ├── persistence/       # MySQL 数据访问
+│   ├── proxy/             # 代理池
+│   ├── runtime/           # 运行日志
+│   └── project-paths.js   # 项目根目录和运行数据路径
+├── database/              # 数据库迁移 SQL
+├── mysql-schema.sql       # 初始化 SQL；保留原路径以兼容既有 Docker 挂载
 ├── hcaptcha/              # Python hCaptcha solver
-├── public/
-│   ├── index.html         # 用户前台
-│   ├── admin.html         # 管理后台
-│   └── admin-login.html   # 后台登录
-├── scripts/
-│   ├── install.sh         # macOS / Linux 一键安装
-│   └── install-windows.ps1
+├── public/                # 用户前台和管理后台静态文件
+├── scripts/               # 部署入口、安装及数据库维护脚本
+│   └── db/                # 数据库迁移/重置脚本
+├── docs/                  # 对接文档与历史记录
+├── test/                  # 自动测试
+├── data/                  # 持久化配置和浏览器池数据，不随源码迁移
 ├── docker-compose.yml     # Docker 一键部署
 ├── Dockerfile
-├── mysql-schema.sql
-├── .env.example
-└── 对接api.md             # 第三方代充 API 對接文件
+└── .env.example
 ```
+
+`debug_screenshots/` 和 `product_files/` 等运行数据仍位于项目根目录；重构不会迁移或清空它们。`scripts/db/reset-db.js` 会删除数据库表，不应在升级时运行。
 
 ---
 
 ## 接口文档
 
-本系統 REST API 請依 `server.js` 路由使用；第三方代充接口見 [對接 API 文件](对接api.md)。常用接口：
+本系統 REST API 請依 `server.js` 路由使用；第三方代充接口見 [對接 API 文件](docs/对接api.md)。常用接口：
 
 | 用途 | Method + Path | 鉴权 |
 |------|---------------|------|
@@ -420,7 +426,7 @@ A: 多为卡 BIN 被风控、余额不足或代理 IP 不干净。换卡、换�
 A: 后台批量导入，或配置 Webhook `POST /api/external/cards/push` 自动补货。
 
 **Q: 修改哪些文件需要重启？**  
-A: `server.js`、`mysql-store.js`、`product_activator.js` 等主进程文件需重启；`index.js`、`stripe-payment.js` 等子进程文件下次任务自动加载。
+A: `server.js` 和由主进程加载的 `src/` 模块需重启；仅由任务子进程加载的模块在下次任务启动时读取。Docker 更新目录结构后应重建并重新创建 app 容器，参见 [部署说明](DEPLOY.md)。
 
 **Q: Windows 上 Playwright 安装失败？**  
 A: 管理员 PowerShell 执行：`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`，再 `npx playwright install chromium`。

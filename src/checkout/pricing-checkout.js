@@ -1,9 +1,9 @@
 'use strict';
 
-const { getRegionConfig } = require('./region-config');
-const { assertChatGptLoggedIn } = require('./session-auth');
-const { clearHumanVerification } = require('./human-verification');
-const { resolvePlanName } = require('./mysql-store');
+const { getRegionConfig } = require('../config/region-config');
+const { assertChatGptLoggedIn } = require('../browser/session-auth');
+const { clearHumanVerification } = require('../captcha/human-verification');
+const { resolvePlanName } = require('../persistence/mysql-store');
 
 const PRICING_URL = 'https://chatgpt.com/#pricing';
 

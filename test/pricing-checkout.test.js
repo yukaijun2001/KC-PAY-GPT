@@ -1,9 +1,10 @@
 'use strict';
 
-const { validateUiCheckoutPayload, waitForCheckoutPage } = require('../pricing-checkout');
+const { validateUiCheckoutPayload, waitForCheckoutPage } = require('../src/checkout/pricing-checkout');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { createRequire } = require('module');
 
 describe('UI Checkout plan/region guard', () => {
     it('accepts the selected plan, billing region and currency', () => {
@@ -37,7 +38,8 @@ describe('UI Checkout plan/region guard', () => {
 
 describe('UI Checkout request guard integration', () => {
     function fixture({ sentPlan = 'chatgptplusplan', upstreamStatus = 200, upstreamBody = '', responseDuringWait = false, bodyDelayMs = 0 } = {}) {
-        const source = fs.readFileSync(path.join(__dirname, '../pricing-checkout.js'), 'utf8');
+        const sourcePath = path.join(__dirname, '../src/checkout/pricing-checkout.js');
+        const source = fs.readFileSync(sourcePath, 'utf8');
         const listener = new Map();
         const route = {
             request: () => ({ method: () => 'POST', postDataJSON: () => ({
@@ -54,7 +56,7 @@ describe('UI Checkout request guard integration', () => {
         };
         const module = { exports: {} };
         const context = vm.createContext({
-            require: (name) => require(path.join(__dirname, '..', name)), module, console,
+            require: createRequire(sourcePath), module, console,
             setTimeout, clearTimeout
         });
         vm.runInContext(source, context);

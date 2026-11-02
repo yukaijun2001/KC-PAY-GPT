@@ -7,6 +7,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { projectPath } = require('../project-paths');
 const { chromium } = require('playwright-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
@@ -90,7 +91,7 @@ function formatBytes(bytes) {
 }
 
 async function collectSlotDetail(slot) {
-    const profileDir = path.join(__dirname, 'data', 'browser-pool', `slot-${slot.slotId}`);
+    const profileDir = projectPath('data', 'browser-pool', `slot-${slot.slotId}`);
     const profileSizeBytes = dirSizeBytes(profileDir);
     let pageCount = 0;
     const openUrls = [];
@@ -135,7 +136,7 @@ function buildLaunchArgs(port) {
 
 async function warmSlot(slotId) {
     const port = BASE_PORT + slotId;
-    const profileDir = path.join(__dirname, 'data', 'browser-pool', `slot-${slotId}`);
+    const profileDir = projectPath('data', 'browser-pool', `slot-${slotId}`);
     fs.mkdirSync(profileDir, { recursive: true });
 
     const launchOptions = {

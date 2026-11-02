@@ -1,6 +1,6 @@
 'use strict';
 
-const { extractProfileFromToken } = require('./session-auth');
+const { extractProfileFromToken } = require('../browser/session-auth');
 
 const CHATGPT_ORIGIN = 'https://chatgpt.com';
 

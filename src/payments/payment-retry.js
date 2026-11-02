@@ -10,10 +10,10 @@
  * 4. 成功 → 绑定地址/姓名到卡片、标记地址已绑定
  */
 
-const store = require('./mysql-store');
+const store = require('../persistence/mysql-store');
 const { completeStripeCardPayment, readCheckoutDueAmount, estimateTaxFreeAmount } = require('./stripe-payment');
 const { pickBillingAddressForCheckout, markAddressBound } = require('./tax-free-address');
-const { getRegionConfig } = require('./region-config');
+const { getRegionConfig } = require('../config/region-config');
 
 const MAX_CARD_ATTEMPTS = Number(process.env.PAYMENT_MAX_CARD_ATTEMPTS) || 3;
 const MAX_AUTOMATION_ATTEMPTS = MAX_CARD_ATTEMPTS;

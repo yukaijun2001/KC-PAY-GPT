@@ -1,6 +1,6 @@
 'use strict';
 
-const store = require('./mysql-store');
+const store = require('../persistence/mysql-store');
 
 // ─── Validation ────────────────────────────────────────────────────────────────
 

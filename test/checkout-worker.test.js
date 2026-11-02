@@ -52,14 +52,14 @@ async function runDebugWorker({ mode = 'auto', apiError, uiError, launchError, i
     });
     const bootstrapChatGptSession = vi.fn(async () => ({ session: { accessToken: 'test-token' } }));
     const modules = {
-        './payment-retry': { executePaymentWithRetry },
-        './pricing-checkout': { openPricingCheckout },
-        './chatgpt': { openApiCheckout },
-        './mysql-store': { getPaymentRegion: async () => 'PH', resolvePlanName: () => 'chatgptplusplan' },
-        './region-config': require('../region-config'),
-        './session-auth': { installChatGptSession, bootstrapChatGptSession },
-        './browser-runtime': { connectTaskBrowser, applyCdpEnv: vi.fn(), closeTaskBrowser },
-        './playwright-proxy': { preparePlaywrightProxy: async () => ({ proxyConfig: null, cleanup: proxyCleanup }) },
+        './src/payments/payment-retry': { executePaymentWithRetry },
+        './src/checkout/pricing-checkout': { openPricingCheckout },
+        './src/checkout/chatgpt': { openApiCheckout },
+        './src/persistence/mysql-store': { getPaymentRegion: async () => 'PH', resolvePlanName: () => 'chatgptplusplan' },
+        './src/config/region-config': require('../src/config/region-config'),
+        './src/browser/session-auth': { installChatGptSession, bootstrapChatGptSession },
+        './src/browser/browser-runtime': { connectTaskBrowser, applyCdpEnv: vi.fn(), closeTaskBrowser },
+        './src/browser/playwright-proxy': { preparePlaywrightProxy: async () => ({ proxyConfig: null, cleanup: proxyCleanup }) },
         fs: { mkdirSync: vi.fn() },
         path
     };
