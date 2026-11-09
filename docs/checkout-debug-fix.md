@@ -218,3 +218,55 @@ git diff --check
 - 全量测试：20 个文件、229 项通过；修改文件的 Node 语法检查和 `git diff --check` 通过。
 - 真实 Chromium 的四项测试拦截全部网络，仅使用本地响应和全新 context：pending init 交接、token 原位交接、超时后脚本确实执行但不续跑、token 迟到结果不提交；无真实 Cookie 或实际 Checkout。
 - 未在真实账号上验证上游 Sentinel 是否签发 token，未提交真实支付；因此不能将本地测试或健康检查等同于线上风控已通过。
+
+## 2026-11-09：Personal / Plus 页面被误判为 Business
+
+### 现象与复现
+
+任务在进入定价页后退出，报错“定价页停留在 Business 套餐，未能切换到 Personal，无法购买 Plus/Pro”。截图显示 Personal 已选中、Free / Plus 卡片和 `Upgrade to Plus` 按钮可见。
+
+在本地 Chromium 中保留截图的精简布局、仅增加页面其他位置或卡片下方的 `ChatGPT Business` 链接/宣传文案，旧代码即可复现相同异常。仅含截图可见元素的布局原本可以通过；截图本身不足以确定失败时完整 DOM。本地没有日志所指的容器录像文件，本轮未回放该线上任务。
+
+已确认的代码缺陷：
+
+- `isBusinessTabActive` 将全页 `ChatGPT Business` 文案作为 Business 选中依据，只有旧标题 `ChatGPT Plus` 能抵消该判断。新版标题 `Plus` 不匹配，且此判断会提前跳过实际存在的 Plus 升级按钮。
+- `switchToPersonalPlans` 仅凭 Personal 的 ARIA 选中状态提前返回；React 可能先更新标签，再异步替换套餐卡片。原有 `isVisible({ timeout })` 调用不会等待卡片加载。
+
+### 修复
+
+- 识别范围限定在可见定价弹窗或可见 `main`，忽略隐藏旧弹窗及背景页面。
+- Business 标签依据明确选中状态判断，支持 tab/button/radio、`aria-selected` / `aria-pressed` / `aria-checked`、`data-state` 和原生 radio。
+- Personal 内容兼容 `Plus` / `ChatGPT Plus`、Go、Pro 卡片及对应升级按钮；非选中的 Business 标签或宣传文案不再覆盖个人套餐证据。匹配时检查所有候选，避免隐藏的首个节点遮蔽可见卡片。
+- 点击切换后轮询实际套餐内容，默认最多等待 8 秒；已选中的 Personal 仍需等卡片出现，不重复点击。真实 Business 选中状态或 Business 卡片且没有个人套餐内容时，仍保留错误。
+- Checkout 的套餐、国家、币种请求校验保持原逻辑。
+
+```mermaid
+flowchart TD
+    A[进入可见定价弹窗或 main] --> B{Business 控件明确选中?}
+    B -->|否| C{个人套餐标题或升级按钮已显示?}
+    C -->|是| G[选择地区并点击目标套餐]
+    B -->|是| D[定位并点击 Personal]
+    C -->|否| D
+    D --> E[等待个人套餐卡片实际出现]
+    E -->|已显示| G
+    E -->|超时| F{仍有 Business 选中或卡片证据?}
+    F -->|是| X[报告切换失败并停止]
+    F -->|否| H[继续既有升级按钮查找和诊断]
+    G --> I[既有套餐及地区请求校验]
+```
+
+### 验证与生效
+
+```bash
+npx vitest run test/pricing-personal-ui.test.js --reporter=verbose --silent
+npm test -- --reporter=dot --silent
+node --check src/checkout/pricing-checkout.js
+node --check test/pricing-personal-ui.test.js
+git diff --check
+```
+
+- 修复前首轮 8 个 Chromium 场景中有 5 个失败，包含相同 Business 异常及标签先于卡片更新的竞态。
+- 修复后新增 18 项 Chromium 回归全部通过，覆盖新版/旧版 Plus、Go/Pro、背景 Business 文案、可见弹窗、隐藏重复标题、不同切换控件、延迟渲染、原生 radio 及真实 Business 页面。
+- 全量测试：29 个文件、399 项通过；语法和差异检查通过。
+- 新增用例全部拦截外部网络；未使用真实 Session、未创建真实 Checkout、未付款。现有自动测试不能代表原线上任务已经成功。
+- 本轮只修改本地代码，未推送或部署。当前 `docker-compose.yml` 将 `./src` 只读挂载到 `/app/src`；同步修复后，新启动的任务子进程会加载新代码。如需统一重启服务，在没有运行中任务时执行 `docker compose restart app`。没有源码挂载的部署需重新构建并替换 app 容器。已结束的失败任务需要重新提交。

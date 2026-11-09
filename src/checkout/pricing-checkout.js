@@ -85,58 +85,64 @@ function matchesCountryLabel(text, labels) {
     return labels.some((label) => normalized === String(label).toLowerCase());
 }
 
+const PERSONAL_TAB_NAME = /^(?:Personal|个人|個人)$/i;
+const BUSINESS_TAB_NAME = /^(?:Business|商业|商業|企业|企業)$/i;
+const PERSONAL_PLAN_TITLE = /^(?:ChatGPT\s*)?(?:Plus|Go|Pro(?:\s*(?:10|20|50)\s*x)?)$/i;
+const PERSONAL_UPGRADE_BUTTON = /(?:Upgrade to|Get|Subscribe to|升级(?:至|到))\s*(?:ChatGPT\s*)?(?:Plus|Go|Pro)\b/i;
+const BUSINESS_UPGRADE_BUTTON = /(?:Upgrade to|Get|Subscribe to|升级(?:至|到))\s*(?:ChatGPT\s*)?Business\b/i;
+
+async function hasVisibleMatch(locator) {
+    for (let index = 0; index < await locator.count(); index += 1) {
+        if (await locator.nth(index).isVisible().catch(() => false)) return true;
+    }
+    return false;
+}
+
+async function isPlanTabSelected(tab) {
+    return tab.evaluate(node => (
+        ['aria-selected', 'aria-pressed', 'aria-checked'].some(attribute => node.getAttribute(attribute) === 'true')
+        || ['active', 'on', 'checked'].includes(node.getAttribute('data-state'))
+        || (node.tagName === 'INPUT' && node.checked === true)
+    )).catch(() => false);
+}
+
 async function isBusinessTabActive(page) {
-    const businessTab = page.getByRole('tab', { name: /^Business$/i }).first();
-    if (await businessTab.isVisible({ timeout: 800 }).catch(() => false)) {
-        const selected = await businessTab.getAttribute('aria-selected').catch(() => null);
-        const state = await businessTab.getAttribute('data-state').catch(() => null);
-        if (selected === 'true' || state === 'active') {
-            return true;
+    const surface = await getPricingSurface(page);
+    // A Business label/link is present on Personal pages too. Only selected
+    // controls establish tab state; marketing copy must never veto Plus/Go/Pro.
+    for (const role of ['tab', 'button', 'radio']) {
+        const tabs = surface.getByRole(role, { name: BUSINESS_TAB_NAME });
+        for (let index = 0; index < await tabs.count(); index += 1) {
+            const tab = tabs.nth(index);
+            if (await tab.isVisible().catch(() => false) && await isPlanTabSelected(tab)) return true;
         }
     }
-
-    const businessCard = await page.getByText(/ChatGPT Business/i).first().isVisible({ timeout: 800 }).catch(() => false);
-    const plusCard = await page.getByText(/^ChatGPT Plus$/i).first().isVisible({ timeout: 500 }).catch(() => false);
-    return businessCard && !plusCard;
+    return false;
 }
 
 async function isPersonalPlanView(page) {
-    if (await isBusinessTabActive(page)) {
-        return false;
-    }
+    if (await isBusinessTabActive(page)) return false;
 
-    const plusCard = await page.locator('[role="dialog"]').locator('div').filter({
-        hasText: /ChatGPT Plus|^Plus$/
-    }).filter({
-        has: page.getByRole('button', { name: /Upgrade|升级|Subscribe|Get/i })
-    }).first().isVisible({ timeout: 1000 }).catch(() => false);
-
-    if (plusCard) {
-        return true;
-    }
-
-    const plusTitle = await page.getByText(/^ChatGPT Plus$/i).first().isVisible({ timeout: 800 }).catch(() => false);
-    const plusBtn = await page.getByRole('button', { name: /Upgrade to Plus|升级至\s*Plus|Get Plus|Subscribe to Plus/i })
-        .first()
-        .isVisible({ timeout: 800 })
-        .catch(() => false);
-    const goBtn = await page.getByRole('button', { name: /Upgrade to (?:ChatGPT\s*)?Go\b|升级至\s*(?:ChatGPT\s*)?Go\b|Get (?:ChatGPT\s*)?Go\b/i })
-        .first()
-        .isVisible({ timeout: 800 })
-        .catch(() => false);
-    return plusTitle || plusBtn || goBtn;
+    const surface = await getPricingSurface(page);
+    if (await hasVisibleMatch(surface.getByRole('button', { name: PERSONAL_UPGRADE_BUTTON }))) return true;
+    // Both compact "Plus" and legacy "ChatGPT Plus" cards are supported, as
+    // are Go and Pro-only views. The selected Personal tab alone is not ready.
+    return hasVisibleMatch(surface.getByText(PERSONAL_PLAN_TITLE));
 }
 
 async function isBusinessPlanView(page) {
-    const businessTitle = await page.getByText(/ChatGPT Business/i).first().isVisible({ timeout: 800 }).catch(() => false);
-    const onPersonal = await isPersonalPlanView(page);
-    return businessTitle && !onPersonal;
+    if (await isPersonalPlanView(page)) return false;
+    if (await isBusinessTabActive(page)) return true;
+
+    const surface = await getPricingSurface(page);
+    return await hasVisibleMatch(surface.getByRole('heading', { name: /^(?:ChatGPT\s*)?Business$/i }))
+        || await hasVisibleMatch(surface.getByRole('button', { name: BUSINESS_UPGRADE_BUTTON }));
 }
 
 /**
  * 定价页顶部 Personal / Business 切换（Plus/Pro 都在 Personal 下）
  */
-async function switchToPersonalPlans(page) {
+async function switchToPersonalPlans(page, { timeout = 8000 } = {}) {
     if (await isPersonalPlanView(page)) {
         console.log('✅ [步骤] 已在个人套餐 (Personal) 视图');
         return;
@@ -148,38 +154,41 @@ async function switchToPersonalPlans(page) {
         console.log('🔄 [步骤] 正在切换到「个人 / Personal」套餐...');
     }
 
+    const surface = await getPricingSurface(page);
     const personalCandidates = [
-        () => page.getByRole('tab', { name: /^Personal$/i }).first(),
-        () => page.getByRole('tab', { name: /^个人$/ }).first(),
-        () => page.getByRole('button', { name: /^Personal$/i }).first(),
-        () => page.getByRole('button', { name: /^个人$/ }).first(),
-        () => page.getByRole('radio', { name: /^Personal$/i }).first(),
-        () => page.locator('[role="tablist"] [role="tab"]').filter({ hasText: /^Personal$/i }).first(),
-        () => page.locator('button').filter({ hasText: /^Personal$/ }).first(),
-        () => page.locator('[role="dialog"]').getByText('Personal', { exact: true }).first(),
-        () => page.getByText('Personal', { exact: true }).first()
+        surface.getByRole('tab', { name: PERSONAL_TAB_NAME }),
+        surface.getByRole('button', { name: PERSONAL_TAB_NAME }),
+        surface.getByRole('radio', { name: PERSONAL_TAB_NAME }),
+        surface.getByText(PERSONAL_TAB_NAME)
     ];
 
-    for (const getLocator of personalCandidates) {
-        try {
-            const el = getLocator();
-            if (await el.isVisible({ timeout: 1200 })) {
-                const selected = await el.getAttribute('aria-selected').catch(() => null);
-                const pressed = await el.getAttribute('aria-pressed').catch(() => null);
-                if (selected === 'true' || pressed === 'true') {
-                    console.log('✅ [步骤] Personal 标签已选中');
-                    return;
+    let switchLocated = false;
+    for (const candidates of personalCandidates) {
+        for (let index = 0; index < await candidates.count(); index += 1) {
+            try {
+                const tab = candidates.nth(index);
+                if (!await tab.isVisible()) continue;
+                if (!await isPlanTabSelected(tab)) {
+                    await tab.scrollIntoViewIfNeeded().catch(() => {});
+                    await tab.click({ timeout: 8000 });
                 }
-                await el.scrollIntoViewIfNeeded().catch(() => {});
-                await el.click({ timeout: 8000 });
-                await page.waitForTimeout(1800);
-                if (await isPersonalPlanView(page)) {
-                    console.log('✅ [步骤] 已切换到个人套餐 (Personal)');
-                    return;
-                }
-            }
-        } catch (_) { /* try next */ }
+                switchLocated = true;
+                break;
+            } catch (_) { /* try the next visible switch control */ }
+        }
+        if (switchLocated) break;
     }
+
+    // Selection can update before React replaces the cards. Poll the actual
+    // pricing content, and do not repeatedly click a switch during that render.
+    const deadline = Date.now() + timeout;
+    do {
+        if (await isPersonalPlanView(page)) {
+            console.log('✅ [步骤] 已切换到个人套餐 (Personal)');
+            return;
+        }
+        await page.waitForTimeout(250);
+    } while (Date.now() < deadline);
 
     if (await isBusinessPlanView(page)) {
         throw new Error('定价页停留在 Business 套餐，未能切换到 Personal，无法购买 Plus/Pro');
@@ -189,11 +198,11 @@ async function switchToPersonalPlans(page) {
 }
 
 async function getPricingSurface(page) {
-    const dialog = page.locator('[role="dialog"]').first();
-    if (await dialog.isVisible({ timeout: 2000 }).catch(() => false)) {
+    const dialog = page.locator('[role="dialog"]:visible').first();
+    if (await dialog.isVisible().catch(() => false)) {
         return dialog;
     }
-    return page.locator('main').first();
+    return page.locator('main:visible').first();
 }
 
 async function readPricingSurfaceText(page) {

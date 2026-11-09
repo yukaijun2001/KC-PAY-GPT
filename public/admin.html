@@ -2975,6 +2975,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                 <div style="padding: 0 20px 20px;">
                     <p style="font-size: 13px; color: var(--text-dim); margin: 0 0 12px;">
                         粘贴从 <code>chatgpt.com/api/auth/session</code> 复制的 JSON，或只贴 AccessToken。启动后请到「运行日志」查看实时输出。
+                        <br>开通成功后会自动关闭续费并核验状态，当前订阅周期仍可使用；处理结果请在「运行日志」查看。
                     </p>
                     <div style="display: grid; gap: 12px; max-width: 720px;">
                         <input type="text" id="admin_activation_cdk" class="asset-input" placeholder="输入未使用的自助 CDK">
@@ -5428,7 +5429,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                 }
                 showMessage(msg + '，请到「运行日志」查看进度', 'success');
                 await loadSessions(false);
-                await loadAdminData();
+                await loadData();
                 switchPage('runtime_logs', document.querySelector('.nav-item[onclick*="runtime_logs"]'));
             } catch (error) {
                 if (resultEl) {

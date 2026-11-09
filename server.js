@@ -2023,8 +2023,12 @@ app.post('/api/admin/subscription/cancel-auto-renew', async (req, res) => {
         });
 
         if (!result.ok) {
-            return res.status(result.statusCode || 502).json({
+            // Upstream 401 concerns the submitted ChatGPT Session, not admin auth.
+            // Reserve HTTP 401 for authenticateAdmin so authFetch keeps this login.
+            const sessionExpired = result.statusCode === 401;
+            return res.status(sessionExpired ? 422 : (result.statusCode || 502)).json({
                 success: false,
+                ...(sessionExpired ? { code: 'CHATGPT_SESSION_EXPIRED', upstreamStatus: 401 } : {}),
                 message: result.error || '取消自动续费失败'
             });
         }
@@ -2057,8 +2061,12 @@ app.post('/api/admin/subscription/enable-auto-renew', async (req, res) => {
         });
 
         if (!result.ok) {
-            return res.status(result.statusCode || 502).json({
+            // Upstream 401 concerns the submitted ChatGPT Session, not admin auth.
+            // Reserve HTTP 401 for authenticateAdmin so authFetch keeps this login.
+            const sessionExpired = result.statusCode === 401;
+            return res.status(sessionExpired ? 422 : (result.statusCode || 502)).json({
                 success: false,
+                ...(sessionExpired ? { code: 'CHATGPT_SESSION_EXPIRED', upstreamStatus: 401 } : {}),
                 message: result.error || '开启自动续费失败'
             });
         }
@@ -3591,7 +3599,7 @@ function spawnActivationWorker({ task, token, sessionRaw, cdk, cdkDetails, clien
 
                 if (run.analysis.status === 'success') {
                     shouldRollbackCdk = false;
-                    // Go straight to renewal handling after a public recharge.
+                    // Go straight to renewal handling after a successful activation.
                     // Optional progress persistence must not prevent cancelling.
                     if (cancelAutoRenewOnSuccess) break;
                 }
@@ -3889,8 +3897,9 @@ async function handleActivationRequest(req, res) {
             progress: 3
         });
 
-        // Source is determined on the server, never from a client-supplied flag.
-        const cancelAutoRenewOnSuccess = req.path.replace(/\/$/, '').toLowerCase() === '/api/run-process';
+        // Both public and admin manual activations close renewal after success.
+        // Enforce this on the server, never from a client-supplied flag.
+        const cancelAutoRenewOnSuccess = true;
         logTask(task.jobKey, `任务已创建，CDK=${cdk} mode=${useGptApi ? 'gpt-api' : 'local'} cancel_auto_renew=${cancelAutoRenewOnSuccess}`);
         reserveForegroundSlot(task.jobKey);
 

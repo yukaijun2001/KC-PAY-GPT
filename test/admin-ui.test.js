@@ -54,6 +54,7 @@ async function fixture(options = {}) {
             response = { success: true, plans, default_regions: defaults };
         }
         if (url.pathname === '/api/admin/checkout/generate') response = { success: true, jobKey: 'ui-test-job' };
+        if (url.pathname === '/api/admin/trigger-activation') response = { success: true, jobKey: 'manual-activation-test-job', message: '任务已启动，正在为您开通中...' };
         if (url.pathname === '/api/admin/checkout/status/ui-test-job') response = { success: true, status: 'success', screenshots: [], checkout_url: '' };
         if (url.pathname === '/api/admin/runtime-logs') response = { success: true, entries: [], nextAfter: 0 };
         if (url.pathname === '/api/admin/captcharun') {
@@ -158,6 +159,25 @@ describe.skipIf(!fs.existsSync(chromium.executablePath()))('admin workspace — 
         expect(state.captchaStoredToken).toBe('');
         expect(await page.locator('#captcharun_api_token').inputValue()).toBe('');
         expect(await page.locator('#captcharun_clear_btn').isDisabled()).toBe(true);
+    });
+
+    it('explains automatic renewal cancellation and submits the manual activation once', async () => {
+        const { page, state } = await fixture();
+        await navigate(page, 'sessions');
+        expect(await page.locator('#sessions').textContent()).toContain('开通成功后会自动关闭续费并核验状态');
+        await page.locator('#admin_activation_cdk').fill('TEST-MANUAL-CDK');
+        await page.locator('#admin_activation_session').fill('synthetic-session-input');
+        await page.locator('#admin_activation_btn').click({ timeout: 5000 });
+        await page.waitForFunction(() => document.getElementById('runtime_logs')?.classList.contains('active') || !document.getElementById('admin_activation_btn')?.disabled, null, { timeout: 5000 });
+        expect(await page.locator('.page-view.active').getAttribute('id')).toBe('runtime_logs');
+        expect(state.requests.filter(request => request.path === '/api/admin/trigger-activation')).toEqual([{
+            path: '/api/admin/trigger-activation', method: 'POST',
+            body: { cdk: 'TEST-MANUAL-CDK', session: 'synthetic-session-input' },
+            auth: 'Bearer local-ui-fixture'
+        }]);
+        expect(await page.locator('#admin_activation_result').textContent()).toContain('任务已启动');
+        expect(await page.locator('#admin_activation_btn').isEnabled()).toBe(true);
+        expect(state.errors).toEqual([]);
     });
 
     it('renders country labels, keeps untagged entries, and reserves spaced action buttons', async () => {
