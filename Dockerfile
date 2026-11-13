@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2 \
     libxss1 libasound2 libpangocairo-1.0-0 libpango-1.0-0 \
     libxshmfence1 xdg-utils procps \
-    libgl1 libglib2.0-0 xvfb xauth \
+    libgl1 libglib2.0-0 libatomic1 xvfb xauth \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -37,6 +37,7 @@ RUN npx playwright install chromium
 # hCaptcha solver Python 依赖（CPU 版 PyTorch，体积较大，首次 build 需数分钟）
 COPY requirements-hcaptcha.txt ./
 RUN pip install -r requirements-hcaptcha.txt \
+    && python3 -m playwright --version \
     && python3 -m playwright install chromium
 
 # 单独安装显示探针，便于重建时复用上方体积较大的依赖层。
