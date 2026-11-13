@@ -302,33 +302,22 @@ function isOpenAiCustomCheckout(page) {
  */
 async function readCheckoutDueAmount(page) {
     try {
-        const bodyText = String(await page.textContent('body', { timeout: 8000 }).catch(() => '') || '');
-        const patterns = [
-            /Due today[^\n₱$€£]{0,48}?([₱$€£])\s*([\d,]+\.\d{2})/i,
-            /(?:Total due|Pay today|今日应付|应付)[^\n₱$€£]{0,48}?([₱$€£])\s*([\d,]+\.\d{2})/i,
-            /([₱$€£])\s*([\d,]+\.\d{2})\s*(?:\n|$)/,
-        ];
-        const currencyMap = { '₱': 'PHP', '$': 'USD', '€': 'EUR', '£': 'GBP' };
-        for (const re of patterns) {
-            const match = bodyText.match(re);
-            if (!match) continue;
-            const sym = match[1];
-            const amount = parseFloat(String(match[2] || '').replace(/,/g, ''));
-            if (Number.isFinite(amount) && amount > 0) {
-                return { amount, currency: currencyMap[sym] || null };
-            }
+        const bodyText = String(await page.locator('body').innerText({ timeout: 1500 }).catch(() => '') || '');
+        const summary = bodyText.match(/(?:Due today|Total due(?: today)?|Pay today|今日应付|应付)[\s\S]{0,96}/i)?.[0];
+        if (!summary) return null;
+        const marker = '(PHP|USD|SGD|MYR|EGP|EUR|GBP|S\\$|RM|E£|₱|\\$|€|£)';
+        const number = '([\\d,]+(?:\\.\\d{2})?)(?![\\d.])';
+        const before = summary.match(new RegExp(marker + '\\s*' + number, 'i'));
+        const after = !before && summary.match(new RegExp(number + '\\s*' + marker, 'i'));
+        const match = before || after;
+        if (match) {
+            const unit = before ? match[1] : match[2];
+            const amount = Number(String(before ? match[2] : match[1]).replace(/,/g, ''));
+            const currencyMap = { '₱': 'PHP', '$': 'USD', '€': 'EUR', '£': 'GBP', 'S$': 'SGD', RM: 'MYR', 'E£': 'EGP' };
+            if (Number.isFinite(amount) && amount > 0) return { amount, currency: currencyMap[unit.toUpperCase()] || unit.toUpperCase() };
         }
     } catch (_) { /* ignore */ }
     return null;
-}
-
-/** 菲律宾 VAT 12%：1100 PHP 含税 → 约 982.14 PHP 免税 */
-const PH_VAT_RATE = 0.12;
-
-function estimateTaxFreeAmount(taxedAmount) {
-    const n = Number(taxedAmount);
-    if (!Number.isFinite(n) || n <= 0) return null;
-    return Math.round((n / (1 + PH_VAT_RATE)) * 100) / 100;
 }
 
 async function blurActiveBillingField(page) {
@@ -338,110 +327,48 @@ async function blurActiveBillingField(page) {
     await page.waitForTimeout(350);
 }
 
-/**
- * 填写美国免税州后等待 Stripe 重算「Due today」
- */
-async function waitForCheckoutTaxRecalculation(page, options = {}) {
+/** Read the displayed final amount after billing updates; never infer tax rates. */
+async function waitForCheckoutAmount(page, options = {}) {
     const {
-        baselineAmount = null,
-        maxWaitMs = 18000,
-        pollMs = 700,
+        maxWaitMs = 5000,
+        pollMs = 250,
+        stableForMs = 750,
     } = options;
-
-    const taxFreeTarget = baselineAmount ? estimateTaxFreeAmount(baselineAmount) : null;
     const started = Date.now();
-    let lastLogged = null;
+    let stableSince = started;
+    let previous = null;
 
     while (Date.now() - started < maxWaitMs) {
+        const error = await readBillingValidationError(page);
+        if (error) return { ok: false, due: previous, error };
         const due = await readCheckoutDueAmount(page);
         if (due?.amount) {
-            if (taxFreeTarget != null && due.amount <= taxFreeTarget + 0.05) {
-                console.log(`  [Stripe] ✅ 税区已更新，应付: ${due.currency || ''} ${due.amount}`);
+            if (due.amount !== previous?.amount || due.currency !== previous?.currency) {
+                stableSince = Date.now();
+            } else if (Date.now() - stableSince >= stableForMs) {
+                console.log(`  [Stripe] ✅ 结账页应付金额: ${due.currency || ''} ${due.amount}（以页面为准）`);
                 return { ok: true, due };
             }
-            if (baselineAmount && due.amount < baselineAmount * 0.97) {
-                console.log(`  [Stripe] ✅ 应付已从 ${baselineAmount} 降至 ${due.amount}`);
-                return { ok: true, due };
-            }
-            if (lastLogged !== due.amount) {
-                console.log(`  [Stripe] 等待税区重算… 当前应付: ${due.currency || ''} ${due.amount}`);
-                lastLogged = due.amount;
-            }
+            previous = due;
+        } else {
+            previous = null;
+            stableSince = Date.now();
         }
         await page.waitForTimeout(pollMs);
     }
-
-    const finalDue = await readCheckoutDueAmount(page);
-    const stillTaxed = baselineAmount
-        && finalDue?.amount
-        && finalDue.amount >= baselineAmount * 0.99;
-    if (stillTaxed) {
-        return { ok: false, due: finalDue };
-    }
-    return { ok: true, due: finalDue };
-}
-
-async function ensureCheckoutTaxFreeAmount(page, address, baselineAmount) {
-    const due = await readCheckoutDueAmount(page);
-    if (!baselineAmount || !due?.amount) {
-        return { ok: true, due };
-    }
-
-    const taxFreeMax = (estimateTaxFreeAmount(baselineAmount) || 0) + 0.05;
-    if (due.amount <= taxFreeMax) {
-        console.log(`  [Stripe] ✅ 免税金额确认: ${due.currency || ''} ${due.amount}`);
-        return { ok: true, due };
-    }
-
-    console.warn(
-        `  [Stripe] ⚠️ 仍为含税 ${due.amount}，免税应约 ${taxFreeMax.toFixed(2)}，重试州/邮编…`
-    );
-    const stateFullName = normalizeStateFullName(address.state);
-    await selectBillingState(page, stateFullName, address.state);
-    await fillBillingControl(
-        page,
-        [/postal code/i, /zip code/i, /邮政编码/i, /^zip$/i],
-        address.postal_code,
-        '邮编'
-    );
-    await blurActiveBillingField(page);
-    const retry = await waitForCheckoutTaxRecalculation(page, { baselineAmount, maxWaitMs: 15000 });
-    if (retry.ok && retry.due?.amount <= taxFreeMax) {
-        return retry;
-    }
-
-    const finalDue = retry.due || due;
-    const expected = estimateTaxFreeAmount(baselineAmount);
     return {
         ok: false,
-        due: finalDue,
-        error: `账单税区未生效，应付仍为 ${finalDue.currency || ''} ${finalDue.amount}`
-            + (expected ? `（美国免税州应约 ${expected.toFixed(2)}）` : ''),
+        due: previous,
+        error: previous ? '结账金额仍在更新，请稍后核实页面应付金额' : '无法确认结账页应付金额，请检查页面是否完整加载',
     };
 }
 
 async function captureCheckoutDueAmount(page, existing = null) {
-    if (existing?.amount > 0) {
-        return existing;
-    }
     const due = await readCheckoutDueAmount(page);
     if (due?.amount > 0) {
         return { amount: due.amount, currency: due.currency || null };
     }
     return existing;
-}
-
-async function resolveBillingDueResult(page, taxCheck) {
-    const captured = await captureCheckoutDueAmount(
-        page,
-        taxCheck?.due?.amount
-            ? { amount: taxCheck.due.amount, currency: taxCheck.due.currency || null }
-            : null
-    );
-    return {
-        dueAmount: captured?.amount,
-        dueCurrency: captured?.currency,
-    };
 }
 
 async function fillLocatedInput(target, text) {
@@ -457,7 +384,7 @@ async function fillLocatedInput(target, text) {
  * @param {import('playwright').Page} page - Playwright Page 实例
  * @param {object} cardInfo - { number, expiry, cvc, holder }
  * @param {object} address - { line1, city, state, postal_code, country }
- * @param {object} [options] - { cardAttempt?: number, holderName?: string }
+ * @param {object} [options] - { cardAttempt?: number, holderName?: string, expectedCurrency?: string }
  * @returns {Promise<{ success: boolean, error?: string, screenshot?: string, declined?: boolean, canRetryCard?: boolean }>}
  */
 async function completeStripeCardPayment(page, cardInfo, address, options = {}) {
@@ -575,7 +502,7 @@ async function completeStripeCardPayment(page, cardInfo, address, options = {}) 
                     currency: billingResult.dueCurrency || null,
                 };
                 console.log(
-                    `[Stripe] ✅ 免税后应付: ${checkoutDue.currency || ''} ${checkoutDue.amount}`
+                    `[Stripe] ✅ 账单填写后应付: ${checkoutDue.currency || ''} ${checkoutDue.amount}`
                 );
             }
             await dismissAddressAutocomplete(page);
@@ -649,7 +576,24 @@ async function completeStripeCardPayment(page, cardInfo, address, options = {}) 
         }
         }
 
-        checkoutDue = await captureCheckoutDueAmount(page, checkoutDue);
+        if (isOpenAiCustomCheckout(page)) {
+            const billingCheck = await confirmBillingResult(page, address, {});
+            if (!billingCheck.ok) {
+                return { success: false, error: billingCheck.error, screenshot: await saveDebugScreenshot(page, 'billing_validation_failed') };
+            }
+            checkoutDue = { amount: billingCheck.dueAmount, currency: billingCheck.dueCurrency };
+        }
+        else {
+            checkoutDue = await captureCheckoutDueAmount(page, checkoutDue);
+        }
+        const expectedCurrency = String(options.expectedCurrency || '').toUpperCase();
+        if (expectedCurrency && checkoutDue?.currency !== expectedCurrency) {
+            return {
+                success: false,
+                error: `结账币种与配置不一致（期望 ${expectedCurrency}，页面 ${checkoutDue?.currency || '未知'}），未提交支付`,
+                screenshot: await saveDebugScreenshot(page, 'checkout_currency_mismatch')
+            };
+        }
         if (checkoutDue?.amount) {
             console.log(`[Stripe] 提交前确认应付: ${checkoutDue.currency || ''} ${checkoutDue.amount}`);
         }
@@ -1189,6 +1133,11 @@ async function selectNativeBillingOption(el, optionLabels, logLabel, deadline) {
         timeout, force: !visible
     }).catch(() => []);
     if (!selected.includes(match.value)) return false;
+    // selectOption reports the action, not whether a controlled component kept it.
+    // Yield through rendering, then verify the live field instead of a stale flag.
+    await new Promise((resolve) => setTimeout(resolve, Math.min(100, billingActionTimeout(deadline))));
+    const actual = await el.inputValue({ timeout: billingActionTimeout(deadline) || 1 }).catch(() => '');
+    if (actual !== match.value) return false;
     console.log(`  [Stripe] ✅ ${logLabel}: ${match.value} (value)`);
     return true;
 }
@@ -1251,21 +1200,37 @@ async function selectFirstVisibleSelect(page, selectors, optionLabels, logLabel,
 }
 
 async function getCurrentBillingCountryValue(page) {
-    for (const sel of OPENAI_BILLING_FIELD_SELECTORS.country) {
-        try {
-            const el = page.locator(sel).first();
-            if (!(await el.isVisible({ timeout: 800 }))) continue;
-            const tag = await resolveElementTag(el);
-            if (tag !== 'select') continue;
-            const value = await el.inputValue().catch(() => '');
-            const label = await el.evaluate((node) => {
-                const opt = node.options[node.selectedIndex];
-                return opt ? opt.textContent.trim() : '';
-            }).catch(() => '');
-            return { value, label };
-        } catch (_) { /* next */ }
+    const candidates = [
+        page.getByRole('combobox', { name: /country or region|^country$|国家或地区|^国家$/i }),
+        page.getByLabel(/country or region|^country$|国家或地区|^国家$/i),
+        ...OPENAI_BILLING_FIELD_SELECTORS.country.map(selector => page.locator(selector))
+    ];
+    for (const controls of candidates) {
+        for (let index = 0; index < await controls.count(); index += 1) {
+            const el = controls.nth(index);
+            if (!await el.isVisible().catch(() => false)) continue;
+            const label = await readControlValue({ el });
+            const value = await el.inputValue({ timeout: 300 }).catch(() => '');
+            if (label || value) return { value, label };
+        }
     }
     return { value: '', label: '' };
+}
+
+function billingCountryLabels(country) {
+    const code = String(country || '').trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(code)) return [];
+    const labels = [code];
+    for (const locale of ['en', 'zh-CN', 'zh-TW']) {
+        labels.push(new Intl.DisplayNames([locale], { type: 'region' }).of(code));
+    }
+    if (code === 'US') labels.push('United States of America', 'USA');
+    return [...new Set(labels.filter(Boolean))];
+}
+
+function matchesBillingCountry(actual, country) {
+    const normalize = value => String(value || '').replace(/[\u{1F1E6}-\u{1F1FF}]/gu, '').trim().toLowerCase();
+    return billingCountryLabels(country).some(label => normalize(label) === normalize(actual));
 }
 
 const US_STATE_LABELS = {
@@ -1538,35 +1503,27 @@ async function selectBillingComboboxItem(page, item, optionLabels, logLabel, tim
     return false;
 }
 
-async function fillOpenAiBillingDirect(page, address, fullName, baselineAmount = null) {
+async function fillOpenAiBillingDirect(page, address, fullName) {
     const stateFullName = normalizeStateFullName(address.state);
     const countryCode = String(address.country || 'US').trim().toUpperCase() || 'US';
     const filled = { name: false, country: false, line1: false, city: false, postal: false, state: false };
 
     const directWait = 2500;
-    console.log('  [Stripe] 税区优先：国家 → 州 → 邮编 → 街道/城市 → 姓名');
+    console.log('  [Stripe] 按配置账单地址填写：国家 → 州/省 → 邮编 → 街道/城市 → 姓名');
 
     const currentCountry = await getCurrentBillingCountryValue(page);
-    const alreadyUs = currentCountry.value === 'US'
-        || /united states/i.test(currentCountry.label)
-        || /美国/.test(currentCountry.label);
-    if (alreadyUs) {
+    if (matchesBillingCountry(currentCountry.label || currentCountry.value, countryCode)) {
         filled.country = true;
-        console.log('  [Stripe] ✅ 国家已是 United States');
+        console.log(`  [Stripe] ✅ 已核验账单国家: ${countryCode}`);
     } else {
-        filled.country = await selectFirstVisibleSelect(
-            page,
-            OPENAI_BILLING_FIELD_SELECTORS.country,
-            ['United States', '美国', 'US', countryCode],
-            '国家',
-            directWait
-        );
-    }
-
-    if (filled.country) {
-        await page.waitForTimeout(1500);
+        await selectBillingCountry(page, billingCountryLabels(countryCode));
         await blurActiveBillingField(page);
-        await waitForCheckoutTaxRecalculation(page, { baselineAmount });
+        const actualCountry = await getCurrentBillingCountryValue(page);
+        filled.country = matchesBillingCountry(actualCountry.label || actualCountry.value, countryCode);
+        if (!filled.country) {
+            console.warn(`  [Stripe] ⚠️ 账单国家未保持为 ${countryCode}，停止填写不匹配的地址`);
+            return filled;
+        }
         const line1Deadline = Date.now() + 10000;
         while (Date.now() < line1Deadline) {
             const line1Input = await locateBillingLine1Input(page).catch(() => null);
@@ -1584,7 +1541,6 @@ async function fillOpenAiBillingDirect(page, address, fullName, baselineAmount =
     );
     if (filled.state) {
         await blurActiveBillingField(page);
-        await waitForCheckoutTaxRecalculation(page, { baselineAmount });
     }
 
     filled.postal = await fillFirstVisibleSelector(
@@ -1596,7 +1552,6 @@ async function fillOpenAiBillingDirect(page, address, fullName, baselineAmount =
     );
     if (filled.postal) {
         await blurActiveBillingField(page);
-        await waitForCheckoutTaxRecalculation(page, { baselineAmount });
     }
 
     filled.line1 = await fillBillingLine1Strict(page, address.line1);
@@ -1629,7 +1584,7 @@ async function fillOpenAiBillingDirect(page, address, fullName, baselineAmount =
 
 async function fillOpenAiBillingBySectionMeta(page, address, fullName) {
     const stateFullName = normalizeStateFullName(address.state);
-    const countryOptions = ['United States', '美国', 'US'];
+    const countryOptions = billingCountryLabels(address.country);
     const filled = { name: false, country: false, line1: false, city: false, postal: false, state: false };
 
     await focusOpenAiBillingSection(page);
@@ -1651,12 +1606,10 @@ async function fillOpenAiBillingBySectionMeta(page, address, fullName) {
     const afterName = nameIndex >= 0 ? items.slice(nameIndex + 1) : items;
     const countryItem = await pickBillingItem(afterName, [/country/, /region/, /国家/, /地区/])
         || afterName.find((item) => item.meta.tag === 'select' || item.meta.role === 'combobox');
-    const countryAlreadyUs = await page.getByText(/^United States$|^美国$/).first()
-        .isVisible({ timeout: 600 })
-        .catch(() => false);
-    if (countryAlreadyUs) {
+    const currentCountry = await getCurrentBillingCountryValue(page);
+    if (matchesBillingCountry(currentCountry.label || currentCountry.value, address.country)) {
         filled.country = true;
-        console.log('  [Stripe] ✅ 国家已是 United States');
+        console.log(`  [Stripe] ✅ 已核验账单国家: ${address.country}`);
     } else if (countryItem) {
         filled.country = await selectBillingComboboxItem(page, countryItem, countryOptions, '国家');
         if (filled.country) {
@@ -1813,34 +1766,30 @@ async function fillBillingControl(page, labelPatterns, value, logLabel) {
 async function selectBillingCountry(page, optionLabels) {
     const started = Date.now();
     console.log('  [Stripe] 选择国家...');
-    const ok = await selectFirstVisibleSelect(
-        page,
-        OPENAI_BILLING_FIELD_SELECTORS.country,
-        optionLabels,
-        '国家'
-    );
-    if (ok) {
-        console.log(`  [Checkout/耗时] 国家选择 ${Date.now() - started}ms`);
-        return true;
+    const name = /country or region|国家或地区|^country$|^国家$/i;
+    const candidates = [
+        page.getByRole('combobox', { name }), page.getByLabel(name),
+        ...OPENAI_BILLING_FIELD_SELECTORS.country.map(selector => page.locator(selector))
+    ];
+    const deadline = Date.now() + 8000;
+    for (const controls of candidates) {
+        for (let index = 0; index < await controls.count(); index += 1) {
+            if (Date.now() >= deadline) break;
+            const field = controls.nth(index);
+            if (!await field.isVisible().catch(() => false)) continue;
+            const selected = await selectBillingComboboxItem(page, { el: field }, optionLabels, '国家', deadline - Date.now());
+            if (!selected) continue;
+            await page.waitForTimeout(100);
+            const actual = await getCurrentBillingCountryValue(page);
+            const normalize = value => String(value || '').replace(/[\u{1F1E6}-\u{1F1FF}]/gu, '').trim().toLowerCase();
+            if (optionLabels.some(label => [actual.value, actual.label].some(value => normalize(value) === normalize(label)))) {
+                console.log(`  [Checkout/耗时] 国家选择 ${Date.now() - started}ms（已核验可见控件）`);
+                return true;
+            }
+        }
     }
-
-    const patterns = [/country or region/i, /国家或地区/i, /^country$/i, /国家/];
-    let field = null;
-    for (const pat of patterns) {
-        field = await findBillingControl(page, pat, 'combobox');
-        if (field) break;
-    }
-    if (!field) {
-        field = await findBillingControl(page, patterns, 'textbox');
-    }
-    if (!field) {
-        console.log('  [Stripe] ⚠️ 国家字段未找到');
-        return false;
-    }
-
-    const selected = await selectBillingComboboxItem(page, { el: field }, optionLabels, '国家');
-    console.log(`  [Checkout/耗时] 国家选择 ${Date.now() - started}ms result=${selected}`);
-    return selected;
+    console.warn(`  [Checkout/耗时] 国家选择 ${Date.now() - started}ms result=false（页面未确认）`);
+    return false;
 }
 
 async function selectBillingState(page, stateFullName, stateRaw) {
@@ -1905,7 +1854,7 @@ async function fillBillingByDomOrder(page, fullName, address, stateFullName) {
             const ok = await selectBillingComboboxItem(
                 page,
                 item,
-                ['United States', '美国', 'US'],
+                billingCountryLabels(address.country),
                 '国家'
             );
             if (ok) {
@@ -1941,24 +1890,88 @@ async function fillBillingByDomOrder(page, fullName, address, stateFullName) {
     return result;
 }
 
-async function hasBillingValidationError(page) {
+async function readBillingValidationError(page) {
+    const invalidField = await page.evaluate(() => {
+        const visible = node => node.getClientRects().length > 0
+            && getComputedStyle(node).visibility !== 'hidden'
+            && !node.closest('[hidden], [inert]');
+        for (const node of document.querySelectorAll('input, select, textarea, [role="combobox"]')) {
+            if (!visible(node) || node.matches(':disabled')) continue;
+            const label = Array.from(node.labels || []).map(item => item.textContent.trim()).join(' ')
+                || node.getAttribute('aria-label')
+                || (node.getAttribute('aria-labelledby') || '').split(/\s+/)
+                    .map(id => document.getElementById(id)?.textContent || '').join(' ').trim()
+                || node.name || node.id;
+            const identity = `${label} ${node.autocomplete || ''} ${node.name || ''} ${node.id || ''}`;
+            if (!/billing|address|postal|zip|province|administrative|locality|country|^city$|^state$|^full name$|账单|邮编|省|州/i.test(identity)) continue;
+            if (node.getAttribute('aria-invalid') === 'true' || (node.willValidate && !node.validity.valid)) {
+                const described = (node.getAttribute('aria-errormessage') || node.getAttribute('aria-describedby') || '')
+                    .split(/\s+/).map(id => document.getElementById(id)).filter(item => item && visible(item))
+                    .map(item => item.textContent.trim()).filter(Boolean).join(' ');
+                return `账单字段 ${label || 'unknown'} 未通过校验: ${described || node.validationMessage || '字段值无效'}`;
+            }
+        }
+        return '';
+    }).catch(() => '无法读取账单字段校验状态，请检查页面是否已关闭');
+    if (invalidField) return invalidField;
+
     const patterns = [
         /your billing address is required/i,
         /please provide your full name/i,
         /this field is incomplete/i,
+        /(?:postal|zip) code is invalid/i,
+        /(?:invalid|enter a valid).*?(?:postal|zip|province|state|billing address)/i,
+        /please\s+(?:select|provide)\b.*?(?:province|state|country)/i,
         /请提供.*全名/i,
         /此字段不完整/i,
-        /您的账单地址/i
+        /您的账单地址/i,
+        /邮(?:政)?编.*(?:无效|不正确)|(?:请选择|请填写).*(?:省|州|国家)/i
     ];
     for (const re of patterns) {
         try {
-            const el = page.getByText(re).first();
-            if (await el.isVisible({ timeout: 300 })) {
-                return true;
+            const matches = page.getByText(re);
+            for (let index = 0; index < await matches.count(); index += 1) {
+                const el = matches.nth(index);
+                if (await el.isVisible().catch(() => false)) {
+                    const text = String(await el.innerText()).trim();
+                    // Playwright text matching includes hidden descendants; only
+                    // a visible error message may invalidate the current form.
+                    if (re.test(text)) return `账单地址未通过页面校验: ${text}`;
+                }
             }
         } catch (_) { /* next */ }
     }
-    return false;
+    return '';
+}
+
+async function hasBillingValidationError(page) {
+    return Boolean(await readBillingValidationError(page));
+}
+
+async function confirmBillingResult(page, address, filled, extra = {}) {
+    const status = getBillingFieldStatus(await readBillingInputValues(page), filled, address);
+    const missing = listBillingMissing(status);
+    const error = await readBillingValidationError(page);
+    if (missing.length || error) {
+        return {
+            ok: false, filled, ...extra,
+            error: [missing.length ? `账单地址未完整填写或与配置不符 (缺失: ${missing.join(', ')})` : '', error].filter(Boolean).join('；')
+        };
+    }
+    const amountCheck = await waitForCheckoutAmount(page);
+    if (!amountCheck.ok) return { ok: false, error: amountCheck.error, filled, ...extra };
+    // Amount updates may re-render the billing controls; validate their final state.
+    const finalStatus = getBillingFieldStatus(await readBillingInputValues(page), filled, address);
+    const finalError = await readBillingValidationError(page);
+    if (listBillingMissing(finalStatus).length || finalError) {
+        return { ok: false, filled, ...extra, error: finalError || '账单字段在金额更新后发生变化，请核实账单地址' };
+    }
+    console.log('  [Stripe] ✅ 账单地址校验通过（已回读页面字段）');
+    return {
+        ok: true, filled, ...extra,
+        dueAmount: amountCheck.due.amount,
+        dueCurrency: amountCheck.due.currency
+    };
 }
 
 /**
@@ -1973,27 +1986,16 @@ async function fillOpenAiCheckoutBilling(page, address, fullName) {
     await dismissAddressAutocomplete(page);
 
     const preBillingDue = await readCheckoutDueAmount(page);
-    const baselineAmount = preBillingDue?.amount || null;
-    if (baselineAmount) {
-        const taxFree = estimateTaxFreeAmount(baselineAmount);
-        console.log(
-            `  [Stripe] 填地址前应付: ${preBillingDue.currency || ''} ${baselineAmount}`
-            + (taxFree ? `（免税州目标约 ${taxFree.toFixed(2)}）` : '')
-        );
+    if (preBillingDue?.amount) {
+        console.log(`  [Stripe] 填地址前应付: ${preBillingDue.currency || ''} ${preBillingDue.amount}`);
     }
 
-    if (await isOpenAiBillingFormComplete(page)) {
+    if (!billingCountryLabels(address.country).length) {
+        return { ok: false, error: '账单地址缺少有效国家代码，请配置持卡人的真实账单地址', filled };
+    }
+    if (await isOpenAiBillingFormComplete(page, filled, address)) {
         console.log('  [Stripe] ✅ 账单表单已完整，跳过重复填写');
-        const taxCheck = await ensureCheckoutTaxFreeAmount(page, address, baselineAmount);
-        if (!taxCheck.ok) {
-            return { ok: false, error: taxCheck.error, filled, skipped: true };
-        }
-        return {
-            ok: true,
-            filled,
-            skipped: true,
-            ...(await resolveBillingDueResult(page, taxCheck)),
-        };
+        return confirmBillingResult(page, address, filled, { skipped: true });
     }
 
     try {
@@ -2007,35 +2009,30 @@ async function fillOpenAiCheckoutBilling(page, address, fullName) {
     }
 
     await focusOpenAiBillingSection(page);
-    filled = await fillOpenAiBillingDirect(page, address, fullName, baselineAmount);
-    filled = await syncFilledFlags(page, filled);
+    filled = await fillOpenAiBillingDirect(page, address, fullName);
+    filled = await syncFilledFlags(page, filled, address);
     await dismissAddressAutocomplete(page);
 
-    if (await isOpenAiBillingFormComplete(page, filled)) {
-        console.log('  [Stripe] ✅ 账单地址校验通过（直连填写）');
-        const taxCheck = await ensureCheckoutTaxFreeAmount(page, address, baselineAmount);
-        if (!taxCheck.ok) {
-            return { ok: false, error: taxCheck.error, filled };
-        }
-        return {
-            ok: true,
-            filled,
-            ...(await resolveBillingDueResult(page, taxCheck)),
-        };
+    if (await isOpenAiBillingFormComplete(page, filled, address)) {
+        return confirmBillingResult(page, address, filled);
     }
 
-    let status = getBillingFieldStatus(await readBillingInputValues(page), filled);
-    let missing = listBillingMissing(status);
+    let status = getBillingFieldStatus(await readBillingInputValues(page), filled, address);
+    const missing = listBillingMissing(status);
 
     if (missing.length > 0) {
         console.log(`  [Stripe] 仍需补填: ${missing.join(', ')}`);
 
+        if (!status.country) {
+            await selectBillingCountry(page, billingCountryLabels(address.country));
+            await blurActiveBillingField(page);
+            status = getBillingFieldStatus(await readBillingInputValues(page), filled, address);
+            if (!status.country) {
+                return { ok: false, filled, error: `账单国家与配置 ${address.country} 不一致，未提交支付；请核实真实账单地址及结账地区` };
+            }
+        }
         if (!status.name) {
             filled.name = await fillBillingFullNameStrict(page, fullName);
-        }
-        if (!status.country) {
-            filled.country = await selectBillingCountry(page, ['United States', '美国', 'US']);
-            if (filled.country) await page.waitForTimeout(800);
         }
         if (!status.line1) {
             filled.line1 = await fillBillingLine1Strict(page, address.line1);
@@ -2044,7 +2041,7 @@ async function fillOpenAiCheckoutBilling(page, address, fullName) {
             console.log('  [Stripe] 街道地址仍失败，尝试 section-meta 兜底...');
             const sectionFilled = await fillOpenAiBillingBySectionMeta(page, address, fullName);
             filled.line1 = filled.line1 || sectionFilled.line1;
-            filled = await syncFilledFlags(page, filled);
+            filled = await syncFilledFlags(page, filled, address);
         }
         if (!status.city) {
             filled.city = await fillBillingControl(page, [/^city$/i, /^城市$/i], address.city, '城市');
@@ -2060,36 +2057,11 @@ async function fillOpenAiCheckoutBilling(page, address, fullName) {
         if (!status.state) {
             filled.state = await selectBillingState(page, stateFullName, address.state);
         }
-        filled = await syncFilledFlags(page, filled);
+        filled = await syncFilledFlags(page, filled, address);
         await dismissAddressAutocomplete(page);
     }
 
-    status = getBillingFieldStatus(await readBillingInputValues(page), filled);
-    missing = listBillingMissing(status);
-
-    if (missing.length > 0) {
-        console.warn(`  [Stripe] ⚠️ 账单字段未全部填写: ${missing.join(', ')}`);
-        const stillError = await hasBillingValidationError(page);
-        if (stillError || missing.includes('line1')) {
-            return {
-                ok: false,
-                error: `账单地址未完整填写 (缺失: ${missing.join(', ') || '校验未通过'})`,
-                filled
-            };
-        }
-    }
-
-    console.log('  [Stripe] ✅ 账单地址校验通过');
-
-    const taxCheck = await ensureCheckoutTaxFreeAmount(page, address, baselineAmount);
-    if (!taxCheck.ok) {
-        return { ok: false, error: taxCheck.error, filled };
-    }
-    return {
-        ok: true,
-        filled,
-        ...(await resolveBillingDueResult(page, taxCheck)),
-    };
+    return confirmBillingResult(page, address, filled);
 }
 
 const BILLING_FULL_NAME_SELECTORS = [
@@ -2100,14 +2072,20 @@ const BILLING_FULL_NAME_SELECTORS = [
 
 async function readControlValue(item) {
     if (!item?.el) return '';
-    const tag = String(item.meta?.tag || '').toLowerCase();
-    if (tag === 'select') {
-        return String(await item.el.evaluate((node) => {
+    return String(await item.el.evaluate(node => {
+        if (node.tagName === 'SELECT') {
             const opt = node.options?.[node.selectedIndex];
-            return opt ? opt.textContent.trim() : (node.value || '');
-        }).catch(() => '')).trim();
-    }
-    return String(await item.el.inputValue({ timeout: 800 }).catch(() => '')).trim();
+            return opt?.value ? opt.textContent.trim() : '';
+        }
+        if (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA') return node.value || '';
+        if (node.getAttribute('role') === 'combobox') {
+            if (node.getAttribute('data-placeholder') != null) return '';
+            const text = String(node.getAttribute('aria-valuetext') || node.textContent || '').trim();
+            if (/^(?:(?:select|choose)(?:\s+.*)?|state|province|country(?: or region)?|州|省|国家或地区)$/i.test(text)) return '';
+            return text;
+        }
+        return '';
+    }).catch(() => '')).trim();
 }
 
 async function readBillingInputValues(page) {
@@ -2147,15 +2125,19 @@ async function readBillingInputValues(page) {
     for (const [key, labelPatterns, placeholderPatterns] of readers) {
         if (result[key]) continue;
         for (const pat of labelPatterns) {
-            try {
-                const el = page.getByLabel(pat).first();
-                if (!(await el.isVisible({ timeout: 250 }).catch(() => false))) continue;
-                const val = String(await el.inputValue({ timeout: 800 }).catch(() => '')).trim();
-                if (val) {
-                    result[key] = val;
-                    break;
-                }
-            } catch (_) { /* next */ }
+            const controls = page.getByLabel(pat);
+            for (let index = 0; index < await controls.count(); index += 1) {
+                try {
+                    const el = controls.nth(index);
+                    if (!await el.isVisible().catch(() => false)) continue;
+                    const val = String(await el.inputValue({ timeout: 300 }).catch(() => readControlValue({ el }))).trim();
+                    if (val) {
+                        result[key] = val;
+                        break;
+                    }
+                } catch (_) { /* next visible control */ }
+            }
+            if (result[key]) break;
         }
         if (result[key]) continue;
         for (const pat of placeholderPatterns) {
@@ -2181,7 +2163,7 @@ async function readBillingInputValues(page) {
         for (const sel of selectors) {
             try {
                 const input = page.locator(sel).first();
-                if (!(await input.count())) continue;
+                if (!await input.isVisible().catch(() => false)) continue;
                 const val = String(await input.inputValue({ timeout: 500 }).catch(() => '')).trim();
                 if (val) {
                     result[key] = val;
@@ -2191,24 +2173,23 @@ async function readBillingInputValues(page) {
         }
     }
 
-    if (!result.country) {
-        const currentCountry = await getCurrentBillingCountryValue(page);
-        if (currentCountry.label) result.country = currentCountry.label;
-        else if (currentCountry.value) result.country = currentCountry.value;
-    }
+    // A custom visible widget is authoritative over its hidden native mirror.
+    const currentCountry = await getCurrentBillingCountryValue(page);
+    result.country = currentCountry.value || currentCountry.label || '';
 
     return result;
 }
 
-function getBillingFieldStatus(actual, filled = {}) {
-    const countryOk = /united states|^us$/i.test(actual.country || '');
+function getBillingFieldStatus(actual, _filled = {}, address = {}) {
+    const hasValue = key => Boolean(String(actual[key] || '').trim());
+    const countryOk = matchesBillingCountry(actual.country, address.country || 'US');
     return {
-        name: Boolean(actual.name) || Boolean(filled.name),
-        line1: Boolean(actual.line1) || Boolean(filled.line1),
-        city: Boolean(actual.city) || Boolean(filled.city),
-        postal: Boolean(actual.postal) || Boolean(filled.postal),
-        state: Boolean(actual.state) || Boolean(filled.state),
-        country: countryOk || Boolean(filled.country),
+        name: hasValue('name'),
+        line1: hasValue('line1'),
+        city: hasValue('city'),
+        postal: hasValue('postal'),
+        state: hasValue('state'),
+        country: countryOk,
         actual
     };
 }
@@ -2224,21 +2205,16 @@ function listBillingMissing(status) {
     return missing;
 }
 
-async function syncFilledFlags(page, filled) {
+async function syncFilledFlags(page, filled, address = {}) {
     const actual = await readBillingInputValues(page);
-    if (actual.name) filled.name = true;
-    if (actual.line1) filled.line1 = true;
-    if (actual.city) filled.city = true;
-    if (actual.postal) filled.postal = true;
-    if (actual.state) filled.state = true;
-    if (/united states|^us$/i.test(actual.country || '')) filled.country = true;
-    return filled;
+    const { actual: _actual, ...status } = getBillingFieldStatus(actual, filled, address);
+    return status;
 }
 
-async function isOpenAiBillingFormComplete(page, filled = {}) {
+async function isOpenAiBillingFormComplete(page, filled = {}, address = {}) {
     const values = await readBillingInputValues(page);
-    const status = getBillingFieldStatus(values, filled);
-    return listBillingMissing(status).length === 0;
+    const status = getBillingFieldStatus(values, filled, address);
+    return listBillingMissing(status).length === 0 && !await hasBillingValidationError(page);
 }
 
 async function billingFullNameHasValue(page) {
@@ -2871,8 +2847,6 @@ module.exports = {
     discoverCardInputs,
     prepareCheckoutCardSection,
     readCheckoutDueAmount,
-    estimateTaxFreeAmount,
-    waitForCheckoutTaxRecalculation,
-    ensureCheckoutTaxFreeAmount,
+    waitForCheckoutAmount,
     captureCheckoutDueAmount
 };

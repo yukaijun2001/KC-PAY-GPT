@@ -11,7 +11,7 @@
  */
 
 const store = require('../persistence/mysql-store');
-const { completeStripeCardPayment, readCheckoutDueAmount, estimateTaxFreeAmount } = require('./stripe-payment');
+const { completeStripeCardPayment, readCheckoutDueAmount } = require('./stripe-payment');
 const { pickBillingAddressForCheckout, markAddressBound } = require('./tax-free-address');
 const { getRegionConfig, getPlanPaymentRegion } = require('../config/region-config');
 
@@ -33,9 +33,9 @@ function isPaymentDeclined(errorMsg) {
 }
 
 /**
- * 解析应写入账单的实际扣款金额（优先免税后应付）
+ * 记录本次结账实际观察到的金额，不从税率推算扣款金额。
  */
-async function resolveBilledAmountForRecord(page, paymentResult, preTaxAmount, currency) {
+async function resolveBilledAmountForRecord(page, paymentResult, lastObservedAmount, currency) {
     if (paymentResult?.dueAmount > 0) {
         return {
             amount: paymentResult.dueAmount,
@@ -48,13 +48,7 @@ async function resolveBilledAmountForRecord(page, paymentResult, preTaxAmount, c
             return { amount: due.amount, currency: due.currency || currency };
         }
     } catch (_) { /* ignore */ }
-    if (preTaxAmount > 0) {
-        const estimated = estimateTaxFreeAmount(preTaxAmount);
-        if (estimated && estimated < preTaxAmount * 0.98) {
-            return { amount: estimated, currency };
-        }
-    }
-    return { amount: preTaxAmount, currency };
+    return { amount: lastObservedAmount, currency };
 }
 
 /**
@@ -153,7 +147,8 @@ async function executePaymentWithRetry(page, options) {
         try {
             const paymentResult = await completeStripeCardPayment(page, cardInfo, address, {
                 cardAttempt,
-                holderName: billingHolderName
+                holderName: billingHolderName,
+                expectedCurrency: currency
             });
 
             if (paymentResult.holderName) {
@@ -169,7 +164,7 @@ async function executePaymentWithRetry(page, options) {
                 );
                 billedAmount = resolved.amount;
                 billedCurrency = resolved.currency;
-                progress(`实际扣款金额（免税后）: ${billedCurrency} ${billedAmount}`);
+                progress(`结账应付金额: ${billedCurrency} ${billedAmount}`);
 
                 const holderName = paymentResult.holderName || card.card_holder || billingHolderName || '';
                 await store.bindCardPaymentProfile(card.id, { holderName, address });

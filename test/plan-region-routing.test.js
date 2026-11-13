@@ -43,7 +43,7 @@ function adminRoutes() {
 }
 
 describe('admin regional routing input contract', () => {
-    it.each([['go', 'EG'], ['plus', 'PH'], ['pro_50x', 'PH']])('defaults %s debug requests to %s', async (planType, country) => {
+    it.each([['go', 'EG'], ['plus', 'PH'], ['pro_10x', 'PH'], ['pro_20x', 'PH'], ['pro_50x', 'PH']])('defaults %s debug requests to %s', async (planType, country) => {
         const run = adminRoutes();
         const res = response();
         await run.handlers['post /api/admin/checkout/generate']({ body: { session: '{}', plan_type: planType } }, res);
@@ -100,7 +100,7 @@ describe('payment retry regional defaults without payment execution', () => {
         return { store, run: context.module.exports.executePaymentWithRetry };
     }
 
-    it.each([['go', 'EGP'], ['plus', 'PHP'], ['pro_20x', 'PHP']])('records the %s regional currency, not the global region', async (planType, currency) => {
+    it.each([['go', 'EGP'], ['plus', 'PHP'], ['pro_10x', 'PHP'], ['pro_20x', 'PHP'], ['pro_50x', 'PHP']])('records the %s regional currency, not the global region', async (planType, currency) => {
         const fixture = retryFixture();
         await fixture.run({}, { planType });
         expect(fixture.store.getPaymentRegion).not.toHaveBeenCalled();

@@ -220,6 +220,24 @@ describe('local activation regional proxy routing', () => {
     });
 });
 
+describe('provider activation regional proxy routing', () => {
+    it.each([
+        ['go', 'EG', 'EGP'],
+        ['plus', 'PH', 'PHP'],
+        ['pro_10x', 'PH', 'PHP'],
+        ['pro_20x', 'PH', 'PHP'],
+        ['pro_50x', 'PH', 'PHP']
+    ])('uses the %s plan country %s for proxy selection and provider submission', async (planType, country, currency) => {
+        const run = fixture({ env: { PAYMENT_REGION_OVERRIDE: 'US', PROXY: 'http://stale-proxy.invalid:8080' } });
+        await run.run('provider', false, planType);
+        expect(run.store.getActiveProxy).toHaveBeenCalledExactlyOnceWith(country);
+        expect(run.gptApi.submitPay).toHaveBeenCalledOnce();
+        expect(run.gptApi.submitPay.mock.calls[0][1]).toMatchObject({
+            country, currency, proxy: 'http://task-proxy.invalid:8080'
+        });
+    });
+});
+
 describe.each(['local', 'provider'])('%s admin manual activation flow', mode => {
     it('waits for renewal confirmation before publishing the completed task', async () => {
         const run = fixture({ useProvider: mode === 'provider' });
