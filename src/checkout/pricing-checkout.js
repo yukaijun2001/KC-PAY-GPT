@@ -3,6 +3,7 @@
 const { getRegionConfig } = require('../config/region-config');
 const { normalizePlanType } = require('../config/plans');
 const { assertChatGptLoggedIn } = require('../browser/session-auth');
+const { hasVisibleSessionExpiredChrome } = require('../browser/auth-page-detect');
 const { clearHumanVerification } = require('../captcha/human-verification');
 const { resolvePlanName } = require('../persistence/mysql-store');
 
@@ -143,6 +144,7 @@ async function isBusinessPlanView(page) {
  * 定价页顶部 Personal / Business 切换（Plus/Pro 都在 Personal 下）
  */
 async function switchToPersonalPlans(page, { timeout = 8000 } = {}) {
+    await assertChatGptLoggedIn(page, 'Personal 套餐切换');
     if (await isPersonalPlanView(page)) {
         console.log('✅ [步骤] 已在个人套餐 (Personal) 视图');
         return;
@@ -183,6 +185,7 @@ async function switchToPersonalPlans(page, { timeout = 8000 } = {}) {
     // pricing content, and do not repeatedly click a switch during that render.
     const deadline = Date.now() + timeout;
     do {
+        await assertChatGptLoggedIn(page, 'Personal 套餐切换');
         if (await isPersonalPlanView(page)) {
             console.log('✅ [步骤] 已切换到个人套餐 (Personal)');
             return;
@@ -194,6 +197,7 @@ async function switchToPersonalPlans(page, { timeout = 8000 } = {}) {
         throw new Error('定价页停留在 Business 套餐，未能切换到 Personal，无法购买 Plus/Pro');
     }
 
+    await assertChatGptLoggedIn(page, 'Personal 套餐切换');
     console.warn('[Warn] 未能确认 Personal 切换，将继续查找升级按钮');
 }
 
@@ -619,6 +623,7 @@ async function selectPricingRegion(page, regionCode) {
     const code = String(regionCode || 'PH').toUpperCase();
     const regionConfig = getRegionConfig(code);
     console.log(`🌏 [步骤] 正在选择账单地区: ${regionConfig?.label || code}...`);
+    await assertChatGptLoggedIn(page, '支付地区选择');
 
     if (await pageShowsTargetRegionPricing(page, code)) {
         console.log(`✅ [步骤] 定价页已显示目标地区价格 (${code})，跳过地区切换`);
@@ -629,6 +634,7 @@ async function selectPricingRegion(page, regionCode) {
     console.log(`[Info] 当前定价页片段: ${surfacePreview}`);
 
     for (let attempt = 1; attempt <= 3; attempt += 1) {
+        await assertChatGptLoggedIn(page, '支付地区选择');
         if (await pageShowsTargetRegionPricing(page, code)) {
             console.log(`✅ [步骤] 定价页已显示目标地区价格 (${code})`);
             return;
@@ -660,6 +666,9 @@ async function selectPricingRegion(page, regionCode) {
 
         await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
         await page.waitForTimeout(1000);
+        if (await hasVisibleSessionExpiredChrome(page)) {
+            await assertChatGptLoggedIn(page, '支付地区选择');
+        }
 
         if (await pageShowsTargetRegionPricing(page, code)) {
             console.log(`✅ [步骤] 已切换到目标地区: ${regionConfig?.label || code}`);

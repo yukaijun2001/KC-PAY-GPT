@@ -52,7 +52,7 @@
 | **磁盘** | ≥ 5 GB（含 Chromium + Python hCaptcha 依赖） |
 | **操作系统** | Linux / macOS / Windows |
 
-Linux 无图形界面跑 headless 时，需安装 Playwright 系统依赖（见下方各平台说明）。
+Linux 无桌面环境时，Docker 入口会通过 Xvfb 提供有头 Chromium 所需的虚拟显示；裸机运行请使用 `xvfb-run -a node server.js`。
 
 ---
 
@@ -254,7 +254,7 @@ DB_PASSWORD=你的MySQL密码
 DB_NAME=plus_papay
 ADMIN_PASSWORD=你的后台密码
 PROXY=http://user:pass@proxy-host:port
-HEADFUL=0          # 调试时可设为 1 开启有头浏览器
+HEADFUL=1          # 业务浏览器固定使用有头 Chromium；Linux 容器由 Xvfb 提供虚拟显示
 ```
 
 **⑥ 启动服务**
@@ -459,7 +459,7 @@ sudo certbot --nginx -d your-domain.com
 A: `docker-compose.yml` 已配置 `shm_size: 2gb`。仍崩溃可改为 `4gb`，并确保宿主机内存 ≥ 4 GB。
 
 **Q: Linux 上 Chromium 启动失败？**  
-A: 执行 `npx playwright install-deps chromium`，确认 `HEADFUL=0`（无头模式）。
+A: 执行 `npx playwright install-deps chromium`，并确认 Xvfb 可用；Docker 镜像已包含 Xvfb。
 
 **Q: MySQL 连接被拒绝？**  
 A: Docker 模式下 `DB_HOST=mysql`（compose 服务名）；裸机模式下 `DB_HOST=127.0.0.1`。确认 MySQL 服务已启动。

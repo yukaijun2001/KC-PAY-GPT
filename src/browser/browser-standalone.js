@@ -26,13 +26,12 @@ async function probeUserAgent(browser, fallback = DEFAULT_UA) {
 /**
  * @param {object} options
  * @param {object} [options.proxyConfig]
- * @param {boolean} [options.headful]
  * @param {string} [options.chromiumChannel]
  * @param {string} [options.cdpPort]
  */
 async function connectStandaloneBrowser(options = {}) {
-    const headful = options.headful === true;
-    if (headful && process.platform === 'linux' && !process.env.DISPLAY) {
+    const headful = true;
+    if (process.platform === 'linux' && !process.env.DISPLAY) {
         throw new Error('有头 UI 需要 DISPLAY：Linux 请在桌面环境或 xvfb-run -a node server.js 下运行');
     }
     const chromiumChannel = String(options.chromiumChannel || '').trim();
@@ -42,12 +41,12 @@ async function connectStandaloneBrowser(options = {}) {
         '--disable-blink-features=AutomationControlled',
         `--remote-debugging-port=${cdpPort}`
     ];
-    if (!headful || (process.platform === 'linux' && process.getuid?.() === 0)) {
+    if (process.platform === 'linux' && process.getuid?.() === 0) {
         launchArgs.push('--no-sandbox', '--disable-setuid-sandbox');
     }
 
     const launchOptions = {
-        headless: !headful,
+        headless: false,
         args: launchArgs
     };
     if (chromiumChannel) {
@@ -60,9 +59,7 @@ async function connectStandaloneBrowser(options = {}) {
     const browser = await chromium.launch(launchOptions);
     const cdpUrl = `http://127.0.0.1:${cdpPort}`;
 
-    if (headful) {
-        console.log(`🧪 [Browser/standalone] 有头模式${chromiumChannel ? ` channel=${chromiumChannel}` : ''}`);
-    }
+    console.log(`🧪 [Browser/standalone] 有头模式${chromiumChannel ? ` channel=${chromiumChannel}` : ''}`);
     console.log(`🚀 [Browser/standalone] 已启动独立 Chromium (CDP ${cdpUrl})`);
 
     return {

@@ -25,23 +25,30 @@ describe('headed Checkout browser runtime', () => {
         CDP_PORT: '19222'
     };
 
-    it('does not treat a headless pool connection as a headed browser', async () => {
+    it('uses the headed browser pool for headed tasks', async () => {
         const runtime = loadRuntime();
         await runtime.connectTaskBrowser({ headful: true, env, proxyConfig: { server: 'http://proxy.test' } });
-        expect(runtime.pool).not.toHaveBeenCalled();
-        expect(runtime.standalone).toHaveBeenCalledWith(expect.objectContaining({
-            headful: true, proxyConfig: { server: 'http://proxy.test' }
-        }));
-        const port = runtime.standalone.mock.calls[0][0].cdpPort;
-        expect(Number(port)).toBeGreaterThan(0);
-        expect(String(port)).not.toBe(env.CDP_PORT);
+        expect(runtime.pool).toHaveBeenCalledExactlyOnceWith({
+            poolCdpUrl: env.BROWSER_POOL_CDP_URL,
+            poolSlotId: env.BROWSER_POOL_SLOT
+        });
+        expect(runtime.standalone).not.toHaveBeenCalled();
     });
 
-    it('preserves pool mode for ordinary API attempts', async () => {
+    it('uses the same headed pool for ordinary API attempts', async () => {
         const runtime = loadRuntime();
         await runtime.connectTaskBrowser({ headful: false, env });
         expect(runtime.standalone).not.toHaveBeenCalled();
         expect(runtime.pool).toHaveBeenCalledOnce();
+    });
+
+    it('forces headed mode when running standalone even if legacy flags request headless', async () => {
+        const runtime = loadRuntime();
+        await runtime.connectTaskBrowser({
+            headful: false,
+            env: { BROWSER_RUNTIME_MODE: 'standalone', HEADFUL: '0' }
+        });
+        expect(runtime.standalone).toHaveBeenCalledWith(expect.objectContaining({ headful: true }));
     });
 
     it('closes only an owned browser, never the shared pool', async () => {

@@ -37,8 +37,8 @@ function resolveBrowserRuntimeMode(env = process.env) {
 async function connectTaskBrowser(options = {}) {
     const env = options.env || process.env;
     const mode = resolveBrowserRuntimeMode(env);
-    // 已存在的无头池无法切换成有头；显式有头任务必须独立启动。
-    const forceStandalone = options.forceStandalone === true || options.headful === true;
+    // The browser pool is headed as well; only explicit isolation bypasses it.
+    const forceStandalone = options.forceStandalone === true;
 
     if (mode === 'pool' && !forceStandalone) {
         return connectPoolBrowser({
@@ -49,7 +49,7 @@ async function connectTaskBrowser(options = {}) {
 
     return connectStandaloneBrowser({
         proxyConfig: options.proxyConfig,
-        headful: options.headful,
+        headful: true,
         chromiumChannel: options.chromiumChannel || env.CHROMIUM_CHANNEL,
         cdpPort: forceStandalone ? await availableCdpPort() : env.CDP_PORT
     });

@@ -36,7 +36,9 @@ function shouldBlockLoginNavigation(url, resourceType = '') {
 async function isLoginPageContent(page) {
     try {
         const bodyText = String(await page.textContent('body', { timeout: 5000 }).catch(() => '') || '');
-        return /Sign in with Google/i.test(bodyText)
+        return /your session has expired/i.test(bodyText)
+            || /session expired[.!]?\s*please log in again/i.test(bodyText)
+            || /Sign in with Google/i.test(bodyText)
             || /Sign in to continue/i.test(bodyText)
             || /to continue to OpenAI/i.test(bodyText)
             || /登录\s*ChatGPT/i.test(bodyText)
@@ -52,6 +54,8 @@ async function hasVisibleLoginChrome(page) {
     if (!page || (typeof page.isClosed === 'function' && page.isClosed())) {
         return false;
     }
+    const expiredSession = page.getByText(/your session has expired|session expired/i).first();
+    if (await expiredSession.isVisible({ timeout: 500 }).catch(() => false)) return true;
     const probes = [
         () => page.getByRole('button', { name: /^Log in$/i }).first().isVisible({ timeout: 800 }),
         () => page.getByRole('link', { name: /^Log in$/i }).first().isVisible({ timeout: 800 }),
@@ -66,6 +70,12 @@ async function hasVisibleLoginChrome(page) {
         }
     }
     return false;
+}
+
+async function hasVisibleSessionExpiredChrome(page) {
+    if (!page || (typeof page.isClosed === 'function' && page.isClosed())) return false;
+    return page.getByText(/your session has expired|session expired/i).first()
+        .isVisible({ timeout: 500 }).catch(() => false);
 }
 
 async function hasLoggedInChatUi(page) {
@@ -141,6 +151,7 @@ module.exports = {
     shouldBlockLoginNavigation,
     isLoginPageContent,
     hasVisibleLoginChrome,
+    hasVisibleSessionExpiredChrome,
     hasLoggedInChatUi,
     waitForLoggedInChatUi,
     hasLoggedInSessionApi,

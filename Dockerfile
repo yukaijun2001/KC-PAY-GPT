@@ -51,7 +51,7 @@ RUN mkdir -p debug_screenshots product_files /tmp/hcaptcha_auto_solver_live
 
 ENV NODE_ENV=production \
     PORT=3000 \
-    HEADFUL=0 \
+    HEADFUL=1 \
     XVFB_ENABLED=1 \
     CDP_PORT=9222 \
     CDP_URL=http://127.0.0.1:9222

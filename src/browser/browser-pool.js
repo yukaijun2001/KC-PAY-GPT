@@ -128,7 +128,7 @@ function buildLaunchArgs(port) {
         '--disable-blink-features=AutomationControlled',
         `--remote-debugging-port=${port}`
     ];
-    if (process.env.HEADFUL !== '1') {
+    if (process.platform === 'linux' && process.getuid?.() === 0) {
         args.push('--no-sandbox', '--disable-setuid-sandbox');
     }
     return args;
@@ -140,7 +140,7 @@ async function warmSlot(slotId) {
     fs.mkdirSync(profileDir, { recursive: true });
 
     const launchOptions = {
-        headless: process.env.HEADFUL !== '1',
+        headless: false,
         args: buildLaunchArgs(port),
         viewport: { width: 1920, height: 1080 },
         locale: 'en-US',

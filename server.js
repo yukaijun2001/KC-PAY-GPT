@@ -1946,7 +1946,7 @@ app.post('/api/admin/browser-pool/mode', async (req, res) => {
         res.json({
             success: true,
             message: enabled
-                ? `已切换为浏览器池模式（${info.size || 0} 个槽位）`
+                ? `已切换为有头浏览器池模式（${info.size || 0} 个槽位）`
                 : '已切换为独立浏览器模式（每任务冷启动 Chromium）',
             mode: {
                 enabled,
@@ -3148,17 +3148,15 @@ async function syncBrowserPoolModeFromStore() {
 
 async function spawnWorkerWithBrowser({ jobKey, runtimeEnv, runScript }) {
     const poolEnabled = browserPool.getRuntimeEnabled();
-    if (!poolEnabled || runtimeEnv.HEADFUL === '1') {
-        logTask(jobKey, runtimeEnv.HEADFUL === '1'
-            ? '浏览器模式: 独立有头启动（不占用浏览器池）'
-            : '浏览器模式: 独立启动（后台已关闭浏览器池）');
+    if (!poolEnabled) {
+        logTask(jobKey, '浏览器模式: 独立有头启动（后台已关闭浏览器池）');
         return runScript(buildWorkerRuntimeEnv(runtimeEnv, null, 'standalone'));
     }
     return browserPool.withBrowserSlot(jobKey, async (poolSlot) => {
         if (poolSlot) {
-            logTask(jobKey, `浏览器模式: 池 slot=${poolSlot.slotId} ${poolSlot.cdpUrl}`);
+            logTask(jobKey, `浏览器模式: 有头池 slot=${poolSlot.slotId} ${poolSlot.cdpUrl}`);
         } else {
-            logTask(jobKey, '浏览器模式: 池未就绪，回退独立启动');
+            logTask(jobKey, '浏览器模式: 池未就绪，回退独立有头启动');
         }
         const mode = poolSlot ? 'pool' : 'standalone';
         return runScript(buildWorkerRuntimeEnv(runtimeEnv, poolSlot, mode));
@@ -4047,7 +4045,7 @@ async function start() {
                 jobKey: '',
                 level: 'system',
                 source: 'server',
-                text: '[Browser] 独立启动模式（后台已关闭浏览器池）'
+                text: '[Browser] 独立有头启动模式（后台已关闭浏览器池）'
             });
         }
     } catch (error) {

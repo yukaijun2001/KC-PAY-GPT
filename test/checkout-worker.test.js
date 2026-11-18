@@ -125,25 +125,20 @@ describe('checkout debug worker', () => {
         expect(run.workerProcess.exitCode).toBe(1);
     });
 
-    it('falls back to a headed UI after the reported API error, without making a payment', async () => {
+    it('falls back to UI in the same headed browser after the reported API error', async () => {
         const run = await runDebugWorker({ apiError: unusualActivity });
         expect(run.output).toContain(unusualActivity);
+        expect(run.output).toContain('当前浏览器已是有头模式');
         expect(run.openPricingCheckout).toHaveBeenCalledOnce();
-        expect(run.connectTaskBrowser).toHaveBeenLastCalledWith(expect.objectContaining({
-            headful: true,
-            forceStandalone: true
-        }));
+        expect(run.connectTaskBrowser).toHaveBeenCalledOnce();
         expect(run.output).toContain(`CHECKOUT_URL: ${checkoutUrl}`);
         expect(run.output).toContain('CHECKOUT_DEBUG_SUCCESS');
         expect(run.executePaymentWithRetry).not.toHaveBeenCalled();
         expect(run.workerProcess.exitCode || 0).toBe(0);
         expect(run.proxyCleanup).toHaveBeenCalledOnce();
-        expect(run.context.storageState).toHaveBeenCalledOnce();
-        expect(run.browser.newContext).toHaveBeenLastCalledWith(expect.objectContaining({
-            storageState: { cookies: [], origins: [] }
-        }));
-        expect(run.installChatGptSession).toHaveBeenCalledTimes(2);
-        expect(run.bootstrapChatGptSession).toHaveBeenCalledTimes(2);
+        expect(run.context.storageState).not.toHaveBeenCalled();
+        expect(run.installChatGptSession).toHaveBeenCalledOnce();
+        expect(run.bootstrapChatGptSession).toHaveBeenCalledOnce();
     });
 
     it('keeps API success on the existing browser and stops before payment', async () => {
@@ -179,18 +174,20 @@ describe('checkout debug worker', () => {
         expect(run.executePaymentWithRetry).not.toHaveBeenCalled();
     });
 
-    it('supports an explicit non-headed UI deployment without relaunching the browser', async () => {
-        const run = await runDebugWorker({ apiError: unusualActivity, env: { CHECKOUT_UI_HEADFUL: '0' } });
+    it('does not allow configuration to switch the UI fallback to headless', async () => {
+        const run = await runDebugWorker({ apiError: unusualActivity, env: { CHECKOUT_UI_HEADFUL: '0', HEADFUL: '0' } });
         expect(run.connectTaskBrowser).toHaveBeenCalledOnce();
         expect(run.openPricingCheckout).toHaveBeenCalledOnce();
+        expect(run.output).toContain('当前浏览器已是有头模式');
         expect(run.output).toContain('CHECKOUT_DEBUG_SUCCESS');
-        expect(run.context.close).toHaveBeenCalledOnce();
     });
 
-    it('cleans up after a failed headed launch and never reports success', async () => {
-        const run = await runDebugWorker({ apiError: unusualActivity, fallbackLaunchError: '有头 UI 需要 DISPLAY' });
-        expect(run.output).toContain('有头 UI 需要 DISPLAY');
+    it('keeps the current headed browser when the UI fallback fails', async () => {
+        const run = await runDebugWorker({ apiError: unusualActivity, uiError: 'UI checkout timed out', fallbackLaunchError: 'must not launch another browser' });
+        expect(run.output).toContain('UI checkout timed out');
+        expect(run.output).not.toContain('must not launch another browser');
         expect(run.output).not.toContain('CHECKOUT_DEBUG_SUCCESS');
+        expect(run.connectTaskBrowser).toHaveBeenCalledOnce();
         expect(run.proxyCleanup).toHaveBeenCalledOnce();
         expect(run.context.close).toHaveBeenCalledOnce();
         expect(run.workerProcess.exitCode).toBe(1);

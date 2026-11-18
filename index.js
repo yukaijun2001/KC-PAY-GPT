@@ -178,8 +178,7 @@ async function recoverConnectionClosed(page, fallbackUrl = '') {
  * Main Automation logic
  */
 async function run() {
-    // 切到有头模式调试：HEADFUL=1 node server.js 或 HEADFUL=1 node index.js
-    const DEBUG_HEADFUL = process.env.HEADFUL === '1';
+    const HEADFUL_BROWSER = true;
     const CHROMIUM_CHANNEL = (process.env.CHROMIUM_CHANNEL || '').trim();
 
     let proxyCleanup = async () => { };
@@ -215,7 +214,7 @@ async function run() {
 
         browserSession = await connectTaskBrowser({
             proxyConfig,
-            headful: DEBUG_HEADFUL,
+            headful: HEADFUL_BROWSER,
             chromiumChannel: CHROMIUM_CHANNEL
         });
         applyCdpEnv(browserSession);
@@ -546,36 +545,7 @@ async function run() {
         }
 
         if (!checkoutOpened) {
-            const uiHeadful = process.env.CHECKOUT_UI_HEADFUL !== '0';
-            if (uiHeadful && !(browserSession.mode === 'standalone' && browserSession.headful)) {
-                console.log('[Checkout] 启动独立有头浏览器进行 UI 备用流程（不复用无头池）...');
-                const storageState = await context.storageState();
-                await finalizeVideo(context, page);
-                await closeTaskBrowser(browserSession, browser);
-                context = null;
-                page = null;
-                browser = null;
-                browserSession = null;
-
-                browserSession = await connectTaskBrowser({
-                    proxyConfig,
-                    headful: true,
-                    forceStandalone: true,
-                    chromiumChannel: CHROMIUM_CHANNEL
-                });
-                applyCdpEnv(browserSession);
-                browser = browserSession.browser;
-                context = await browser.newContext({ ...contextOptions, storageState });
-                const fallbackSession = await installChatGptSession(context, sessionRaw);
-                // Session 安装会重新注入原始 Cookie；随后恢复本次浏览器刷新过的值。
-                await context.addCookies(storageState.cookies);
-                await installBrowserFingerprint(context);
-                page = await context.newPage();
-                await bootstrapChatGptSession(page, sessionRaw, {
-                    sessionData: fallbackSession.sessionData,
-                    cookieVerified: fallbackSession.cookieVerified
-                });
-            }
+            console.log('[Checkout] 当前浏览器已是有头模式，直接使用同一会话回退 UI 流程...');
             console.log('🧭 [步骤] 正在打开定价页并选择升级套餐...');
             const checkoutUrl = await openPricingCheckout(page, {
                 region: billingCountry,

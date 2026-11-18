@@ -5,6 +5,7 @@ const path = require('path');
 const vm = require('vm');
 const { createRequire } = require('module');
 const { chromium } = require('playwright');
+const { assertChatGptLoggedIn } = require('../src/browser/session-auth');
 
 const sourcePath = path.join(__dirname, '../src/checkout/pricing-checkout.js');
 const browserAvailable = fs.existsSync(chromium.executablePath());
@@ -15,7 +16,7 @@ function loadPricing() {
     const context = vm.createContext({
         module, console, setTimeout, clearTimeout,
         require: name => name === '../browser/session-auth'
-            ? { assertChatGptLoggedIn: async () => {} }
+            ? { assertChatGptLoggedIn }
             : realRequire(name)
     });
     vm.runInContext(fs.readFileSync(sourcePath, 'utf8'), context);
@@ -72,6 +73,23 @@ describe.skipIf(!browserAvailable)('Personal / Business pricing view in Chromium
         await page.setContent(personalFixture());
         await pricing.module.exports.clickPlanUpgrade(quickPage, 'plus');
         expect(await page.evaluate(() => window.actions)).toEqual(['plus']);
+    });
+
+    it('stops at the session-expired dialog before clicking Personal', async () => {
+        await page.setContent(`
+            <main>
+                <section role="dialog" aria-modal="true">
+                    <h2>Your session has expired</h2>
+                    <p>Please log in again to continue using the app</p>
+                    <button>Log in</button>
+                </section>
+                <button id="personal">Personal</button>
+            </main>
+            <script>window.personalClicks = 0; document.querySelector('#personal').onclick = () => window.personalClicks++;</script>
+        `);
+        await expect(pricing.module.exports.switchToPersonalPlans(quickPage)).rejects.toThrow(/session has expired/i);
+        await expect(pricing.module.exports.selectPricingRegion(quickPage, 'PH')).rejects.toThrow(/session has expired/i);
+        expect(await page.evaluate(() => window.personalClicks)).toBe(0);
     });
 
     it('does not mistake an unrelated ChatGPT Business link for the active plan', async () => {

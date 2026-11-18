@@ -44,11 +44,11 @@ describe('admin Checkout debug dispatch', () => {
         expect(dispatch.runCheckoutScript.mock.calls[0][2].CHECKOUT_MODE).toBe('api');
     });
 
-    it('does not reserve a pool slot for an explicit headed deployment', async () => {
+    it('keeps using the headed pool when the legacy HEADFUL flag is set', async () => {
         const dispatch = checkoutDispatch({ HEADFUL: '1' });
         await dispatch.spawnCheckoutDebugWorker(args);
-        expect(dispatch.withBrowserSlot).not.toHaveBeenCalled();
-        expect(dispatch.runCheckoutScript.mock.calls[0][2].BROWSER_RUNTIME_MODE).toBe('standalone');
+        expect(dispatch.withBrowserSlot).toHaveBeenCalledOnce();
+        expect(dispatch.runCheckoutScript.mock.calls[0][2].BROWSER_RUNTIME_MODE).toBe('pool');
     });
 
     it.each([['go', 'EG'], ['plus', 'PH'], ['pro_10x', 'PH'], ['pro_20x', 'PH'], ['pro_50x', 'PH']])('uses the %s default region and matching proxy', async (planType, region) => {

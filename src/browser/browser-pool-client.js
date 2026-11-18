@@ -30,6 +30,7 @@ async function connectPoolBrowser(options = {}) {
         mode: 'pool',
         browser,
         ownsBrowser: false,
+        headful: true,
         cdpUrl: poolCdpUrl,
         poolSlotId: slotLabel,
         realUserAgent: await probeUserAgent(browser, DEFAULT_UA)

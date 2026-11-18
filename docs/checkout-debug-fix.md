@@ -56,7 +56,7 @@ flowchart TD
 
 - `CHECKOUT_MODE=auto` 默认 API 优先、失败后回退一次 UI。
 - `CHECKOUT_MODE=api` 为明确的 API-only；`ui` 为 UI-only。
-- 默认 `CHECKOUT_UI_HEADFUL=1`，独立启动有头 Chromium，不把已有的无头池当成有头浏览器。
+- 所有业务 Chromium 固定有头运行；API 失败后的 UI 流程复用当前页面和会话，不再重启浏览器。
 - 保存 Cookie/localStorage，重新安装 Session 路由并恢复本次更新后的 Cookie；代理、区域、录像设置保留。
 - 有头实例分配独立 CDP 端口，避免碰撞池端口。
 - 初始浏览器/Session 安装失败也进入资源清理；关闭录像时仍关闭任务 context。

@@ -8,6 +8,7 @@ const {
     shouldBlockLoginNavigation,
     isLoginPageContent,
     hasVisibleLoginChrome,
+    hasVisibleSessionExpiredChrome,
     hasLoggedInChatUi,
     waitForLoggedInChatUi,
     hasLoggedInSessionApi,
@@ -444,10 +445,36 @@ function resolveSessionInput(raw) {
     };
 }
 
+function applyVerifiedSessionApiData(sessionData, currentAccessToken, apiData) {
+    const verifiedAccessToken = String(apiData?.accessToken || apiData?.access_token || '').trim();
+    if (!verifiedAccessToken) {
+        return { accessToken: currentAccessToken, sessionData };
+    }
+
+    const expectedEmail = String(sessionData?.user?.email || extractProfileFromToken(currentAccessToken).email || '').trim().toLowerCase();
+    const verifiedEmail = String(apiData?.user?.email || extractProfileFromToken(verifiedAccessToken).email || '').trim().toLowerCase();
+    if (expectedEmail && verifiedEmail && expectedEmail !== verifiedEmail) {
+        throw new Error('Session Cookie 与输入的 AccessToken 对应不同账号，已停止使用不匹配的凭据');
+    }
+
+    return {
+        accessToken: verifiedAccessToken,
+        sessionData: buildSessionPayload(verifiedAccessToken, {
+            ...sessionData,
+            ...apiData,
+            accessToken: verifiedAccessToken,
+            user: { ...sessionData?.user, ...apiData?.user }
+        })
+    };
+}
+
 async function assertChatGptLoggedIn(page, label = '页面') {
     const url = page.url();
     if (isLoginRedirectUrl(url)) {
         throw new Error(`Session 未生效：${label} 跳转到 Google/登录页 (${url.slice(0, 80)})`);
+    }
+    if (await hasVisibleSessionExpiredChrome(page)) {
+        throw new Error(`Session 未生效：${label} 显示“Your session has expired”，请重新获取当前账号 Session`);
     }
     if (await isLoginPageContent(page)) {
         throw new Error(`Session 未生效：${label} 显示 Google 登录界面，请粘贴完整 Session JSON`);
@@ -485,8 +512,8 @@ async function installChatGptSession(context, sessionRaw) {
         throw new Error('缺少 Session：请粘贴完整 Session JSON（来自 chatgpt.com/api/auth/session）');
     }
 
-    const { accessToken: token, sessionData, sessionJson } = resolved;
-    const sessionBody = JSON.stringify(sessionData);
+    let { accessToken: token, sessionData } = resolved;
+    const { sessionJson } = resolved;
     const cookieSpecs = collectCookieSpecs(sessionData, sessionJson);
 
     const sessionTokenValue = String(
@@ -532,6 +559,9 @@ async function installChatGptSession(context, sessionRaw) {
             cookieVerified = true;
             const email = apiCheck.data?.user?.email || '';
             console.log(`[Session] Cookie 校验通过${email ? `: ${email}` : ''}`);
+            const verified = applyVerifiedSessionApiData(sessionData, token, apiCheck.data);
+            token = verified.accessToken;
+            sessionData = verified.sessionData;
         } else if (apiCheck.error && !/cloudflare|challenge|captcha/i.test(apiCheck.error)) {
             throw new Error(
                 `${apiCheck.error}。请确认 Cookie 未过期，并尽量粘贴浏览器全部 chatgpt.com Cookies（cookies[] 或 cookieHeader）`
@@ -540,6 +570,8 @@ async function installChatGptSession(context, sessionRaw) {
             console.warn(`[Session] Cookie 在线校验跳过: ${apiCheck.error || 'unknown'}`);
         }
     }
+
+    const sessionBody = JSON.stringify(sessionData);
 
     await context.addInitScript((payload) => {
         const sessionStr = JSON.stringify(payload);
@@ -728,6 +760,7 @@ module.exports = {
     extractSessionPreview,
     extractEmailFromSession,
     buildSessionPayload,
+    applyVerifiedSessionApiData,
     isLoginRedirectUrl,
     isHardLoginRedirectUrl,
     isCheckoutPageUrl,

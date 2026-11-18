@@ -118,5 +118,6 @@ describe('project layout and persistent paths', () => {
         const expected = path.join(root, 'data', 'browser-pool', 'slot-3');
         expect(mkdirSync).toHaveBeenCalledWith(expected, { recursive: true });
         expect(launchPersistentContext.mock.calls[0][0]).toBe(expected);
+        expect(launchPersistentContext.mock.calls[0][1].headless).toBe(false);
     });
 });
