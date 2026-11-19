@@ -82,9 +82,10 @@ function parseSessionJson(raw) {
 }
 
 const CHATGPT_COOKIE_URL = 'https://chatgpt.com';
+const CHATGPT_COOKIE_DOMAIN = '.chatgpt.com';
 const SESSION_TOKEN_BASE = '__Secure-next-auth.session-token';
-/** 与 NextAuth SessionStore 一致：4096 - 160 */
-const SESSION_COOKIE_CHUNK_SIZE = 3936;
+/** 与 NextAuth SessionStore（next-auth/core/lib/cookie.js 的 chunkSize）保持一致 */
+const SESSION_COOKIE_CHUNK_SIZE = 3933;
 
 function isSessionTokenCookieName(name) {
     return name === SESSION_TOKEN_BASE || name.startsWith(`${SESSION_TOKEN_BASE}.`);
@@ -174,9 +175,13 @@ function toPlaywrightCookie(spec) {
 
     const base = { name, value, secure, httpOnly, sameSite };
 
-    // __Host- / __Secure- 前缀：只能用 url，不能带 domain/path
-    if (name.startsWith('__Host-') || name.startsWith('__Secure-')) {
+    // __Host- 前缀只能用 url（host-only）；__Secure- 允许 domain，
+    // 必须与 chatgpt.com 自己签发的 Cookie 同域，否则站点轮换时会并存两份。
+    if (name.startsWith('__Host-')) {
         return { ...base, url: CHATGPT_COOKIE_URL };
+    }
+    if (name.startsWith('__Secure-')) {
+        return { ...base, domain: CHATGPT_COOKIE_DOMAIN, path: '/' };
     }
 
     const hostOnly = spec.hostOnly === true;
@@ -225,17 +230,21 @@ async function injectChatGptCookies(context, cookieSpecs) {
         return { injected: 0, hasSessionToken: false, failed: [] };
     }
 
-    const warmup = await context.newPage();
-    try {
-        await warmup.goto(`${CHATGPT_COOKIE_URL}/`, {
-            waitUntil: 'domcontentloaded',
-            timeout: 90000
-        });
-    } catch (_) { /* 代理慢时仍尝试写 Cookie */ }
-
     const playwrightCookies = cookieSpecs
         .map((spec) => toPlaywrightCookie(spec))
         .filter(Boolean);
+
+    // 站点自己也会签发同名分块 Cookie；和注入值并存时浏览器会把两组
+    // .0/.1 一起发给 NextAuth，拼接后的 JWE 无法解密，表现为“Session 过期”。
+    if (playwrightCookies.some((cookie) => isSessionTokenCookieName(cookie.name))) {
+        const existing = await context.cookies(CHATGPT_COOKIE_URL);
+        const names = [...new Set(
+            existing.map((cookie) => cookie.name).filter((name) => isSessionTokenCookieName(name))
+        )];
+        for (const name of names) {
+            await context.clearCookies({ name }).catch(() => {});
+        }
+    }
 
     const failed = [];
     let injected = 0;
@@ -255,7 +264,6 @@ async function injectChatGptCookies(context, cookieSpecs) {
 
     const stored = await context.cookies(CHATGPT_COOKIE_URL);
     const hasSessionToken = hasStoredSessionToken(stored);
-    await warmup.close().catch(() => {});
 
     return {
         injected,
@@ -337,7 +345,14 @@ function collectCookieSpecs(sessionData, sessionJson) {
         push('__Host-next-auth.csrf-token', csrfToken);
     }
 
-    const deviceId = String(sessionData?.deviceId || sessionData?.device_id || sessionData?.['oai-did'] || '').trim();
+    const deviceId = String(
+        sessionData?.deviceId
+        || sessionData?.device_id
+        || sessionData?.['oai-did']
+        || sessionData?.statsigContext?.deviceId
+        || sessionJson?.statsigContext?.deviceId
+        || ''
+    ).trim();
     if (deviceId && !seenNames.has('oai-did')) {
         push('oai-did', deviceId);
     }

@@ -5,7 +5,7 @@ const store = require('../persistence/mysql-store');
 const { getRegionConfig, getPlanPaymentRegion } = require('../config/region-config');
 const { normalizePlanType } = require('../config/plans');
 const { executePaymentWithRetry } = require('../payments/payment-retry');
-const { requestBrowserCheckout } = require('./checkout-browser-request');
+const { requestBrowserCheckout, refreshBrowserAccessToken } = require('./checkout-browser-request');
 
 function buildCheckoutPayload(planName, country, currency) {
     const uiMode = String(process.env.CHECKOUT_UI_MODE || 'custom').trim() || 'custom';
@@ -220,7 +220,21 @@ class ChatGPTService {
                 });
                 apiResponse = { status: response.status(), bodyText: await response.text().catch(() => '') };
             }
-            const parsed = parseCheckoutApiResponse(apiResponse.status, apiResponse.bodyText);
+            let parsed = parseCheckoutApiResponse(apiResponse.status, apiResponse.bodyText);
+
+            if (!parsed.ok && parsed.status === 401 && this.page
+                && /token_revoked|token_invalidated|invalidated oauth token/i.test(String(parsed.error))) {
+                console.warn('[Checkout] AccessToken 已被轮换，尝试复用页面会话刷新后重试一次');
+                const refreshed = await refreshBrowserAccessToken(this.page);
+                if (refreshed) {
+                    this.token = refreshed;
+                    this.headers.Authorization = `Bearer ${refreshed}`;
+                    apiResponse = await requestBrowserCheckout(this.page, { accessToken: refreshed, payload });
+                    parsed = parseCheckoutApiResponse(apiResponse.status, apiResponse.bodyText);
+                } else {
+                    console.warn('[Checkout] 会话刷新不可用（refresh_token 已被其他客户端轮换）');
+                }
+            }
 
             if (!parsed.ok) {
                 const detail = parsed.error;

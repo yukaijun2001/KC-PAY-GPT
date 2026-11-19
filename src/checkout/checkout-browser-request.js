@@ -250,4 +250,55 @@ async function requestBrowserCheckout(page, { accessToken, payload }) {
     });
 }
 
-module.exports = { requestBrowserCheckout };
+/**
+ * 复用站点的会话刷新端点换取新 accessToken。
+ * 仅在原令牌仍能对应有效 refresh_token 时成功；被真实浏览器的轮换抢先时返回 null。
+ */
+async function refreshBrowserAccessToken(page) {
+    if (new URL(page.url()).origin !== CHATGPT_ORIGIN) {
+        return null;
+    }
+    return page.evaluate(async () => {
+        const decode = (token) => {
+            try {
+                const part = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+                return JSON.parse(atob(part));
+            } catch (_) {
+                return null;
+            }
+        };
+        let session;
+        try {
+            session = await (await fetch('/api/auth/session', { credentials: 'include' })).json();
+        } catch (_) {
+            return null;
+        }
+        const current = String(session?.accessToken || '').trim();
+        if (!current) return null;
+        const iat = decode(current)?.iat;
+        const query = new URLSearchParams({
+            refresh: 'true',
+            reason: 'token_revoked',
+            method: 'POST',
+            path: '/backend-api/payments/checkout'
+        });
+        try {
+            const response = await fetch(`/api/auth/session?${query}`, {
+                credentials: 'include',
+                headers: {
+                    ...(iat ? { 'X-OpenAI-Failed-Access-Token-Iat': String(iat) } : {}),
+                    'x-openai-target-path': '/api/auth/session',
+                    'x-openai-target-route': '/api/auth/session'
+                }
+            });
+            const data = await response.json().catch(() => null);
+            const refreshed = String(data?.accessToken || '').trim();
+            if (!response.ok || data?.error || !refreshed || refreshed === current) return null;
+            return refreshed;
+        } catch (_) {
+            return null;
+        }
+    }).catch(() => null);
+}
+
+module.exports = { requestBrowserCheckout, refreshBrowserAccessToken };
