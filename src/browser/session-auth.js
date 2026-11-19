@@ -11,7 +11,7 @@ const {
     hasVisibleSessionExpiredChrome,
     hasLoggedInChatUi,
     waitForLoggedInChatUi,
-    hasLoggedInSessionApi,
+    readLoggedInSessionApi,
     buildSessionNotLoggedInError
 } = require('./auth-page-detect');
 
@@ -456,6 +456,11 @@ function applyVerifiedSessionApiData(sessionData, currentAccessToken, apiData) {
     if (expectedEmail && verifiedEmail && expectedEmail !== verifiedEmail) {
         throw new Error('Session Cookie 与输入的 AccessToken 对应不同账号，已停止使用不匹配的凭据');
     }
+    const expectedAccountId = extractProfileFromToken(currentAccessToken).accountId;
+    const verifiedAccountId = extractProfileFromToken(verifiedAccessToken).accountId;
+    if (expectedAccountId && verifiedAccountId && expectedAccountId !== verifiedAccountId) {
+        throw new Error('Session Cookie 与输入的 AccessToken 对应不同账号，已停止使用不匹配的凭据');
+    }
 
     return {
         accessToken: verifiedAccessToken,
@@ -571,68 +576,11 @@ async function installChatGptSession(context, sessionRaw) {
         }
     }
 
-    const sessionBody = JSON.stringify(sessionData);
-
-    await context.addInitScript((payload) => {
-        const sessionStr = JSON.stringify(payload);
-        try {
-            window.__CHATGPT_BOOTSTRAP_SESSION__ = payload;
-            localStorage.setItem('oai/apps/chat/bootstrap-session', sessionStr);
-        } catch (_) { /* ignore */ }
-
-        const originalFetch = window.fetch.bind(window);
-        window.fetch = async function patchedFetch(input, init) {
-            const url = typeof input === 'string' ? input : (input && input.url) || '';
-            if (url.includes('/api/auth/session')) {
-                return new Response(sessionStr, {
-                    status: 200,
-                    headers: { 'Content-Type': 'application/json' }
-                });
-            }
-            if (url.includes('/api/auth/csrf')) {
-                return new Response(JSON.stringify({ csrfToken: 'bootstrap-csrf-token' }), {
-                    status: 200,
-                    headers: { 'Content-Type': 'application/json' }
-                });
-            }
-            return originalFetch(input, init);
-        };
-    }, sessionData);
-
-    await context.route(/\/api\/auth\/session(\?.*)?$/, async (route) => {
-        await route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: sessionBody
-        });
-    });
-
-    await context.route(/\/api\/auth\/csrf(\?.*)?$/, async (route) => {
-        await route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify({ csrfToken: 'bootstrap-csrf-token' })
-        });
-    });
-
     await context.route('**/*', async (route) => {
         const url = route.request().url();
         const resourceType = route.request().resourceType();
         if (shouldBlockLoginNavigation(url, resourceType)) {
             await route.abort();
-            return;
-        }
-        if (/\/api\/auth\/(session|csrf)/.test(url)) {
-            await route.continue();
-            return;
-        }
-        if (url.includes('auth.openai.com') || url.includes('chatgpt.com') || url.includes('openai.com') || url.includes('pay.openai.com')) {
-            await route.continue({
-                headers: {
-                    ...route.request().headers(),
-                    Authorization: `Bearer ${token}`
-                }
-            });
             return;
         }
         await route.continue();
@@ -657,7 +605,7 @@ async function bootstrapChatGptSession(page, sessionRaw, options = {}) {
         throw new Error('缺少 Session：请粘贴完整 Session JSON');
     }
 
-    const sessionData = options.sessionData || resolved.sessionData;
+    let sessionData = options.sessionData || resolved.sessionData;
     const email = sessionData?.user?.email || extractProfileFromToken(resolved.accessToken).email || '';
 
     if (!email && !sessionData?.user?.id) {
@@ -692,19 +640,30 @@ async function bootstrapChatGptSession(page, sessionRaw, options = {}) {
 
     const cookieVerified = options.cookieVerified === true;
     const uiReady = await waitForLoggedInChatUi(page, cookieVerified ? 12000 : 8000);
-    const apiReady = cookieVerified ? await hasLoggedInSessionApi(page) : false;
+    const actualSession = await readLoggedInSessionApi(page);
+    if (!actualSession.ok) {
+        throw new Error(`${actualSession.error}。请检查真实 Cookie 是否在当前代理下有效`);
+    }
+
+    const expectedEmail = String(sessionData?.user?.email || email || '').trim().toLowerCase();
+    const actualEmail = String(actualSession.data?.user?.email || '').trim().toLowerCase();
+    if (expectedEmail && actualEmail && expectedEmail !== actualEmail) {
+        throw new Error('当前浏览器 Cookie 登录的账号与提交的 Session 不一致，已停止流程');
+    }
+
+    if (actualSession.data?.accessToken || actualSession.data?.access_token) {
+        const verified = applyVerifiedSessionApiData(sessionData, sessionData?.accessToken || resolved.accessToken, actualSession.data);
+        sessionData = verified.sessionData;
+    }
 
     if (await hasVisibleLoginChrome(page)) {
         throw new Error(buildSessionNotLoggedInError('ChatGPT 首页'));
     }
-    if (!uiReady && !apiReady) {
+    if (!uiReady) {
         throw new Error(buildSessionNotLoggedInError('ChatGPT 首页'));
     }
-    if (!uiReady && apiReady) {
-        console.log('[Session] 首页 UI 探针未命中，但 /api/auth/session 已确认登录，继续流程');
-    }
 
-    const resolvedEmail = sessionData?.user?.email || email || extractProfileFromToken(resolved.accessToken).email;
+    const resolvedEmail = actualEmail || sessionData?.user?.email || email || extractProfileFromToken(resolved.accessToken).email;
     console.log(`✅ [步骤] Session 登录成功: ${resolvedEmail}`);
     return {
         email: resolvedEmail,

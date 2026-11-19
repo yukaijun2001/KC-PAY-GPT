@@ -5,6 +5,7 @@ const { chromium } = require('playwright');
 const {
     isLoginPageContent,
     hasVisibleLoginChrome,
+    readLoggedInSessionApi,
     buildSessionNotLoggedInError
 } = require('../src/browser/auth-page-detect');
 const { assertChatGptLoggedIn, applyVerifiedSessionApiData } = require('../src/browser/session-auth');
@@ -80,5 +81,31 @@ describe('verified ChatGPT session API data', () => {
             oldToken,
             { user: { email: 'other@example.com' }, accessToken: otherToken }
         )).toThrow(/different accounts|不同账号/);
+    });
+});
+
+describe('real ChatGPT session API probe', () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    async function probe(response) {
+        vi.stubGlobal('fetch', vi.fn(async () => response));
+        return readLoggedInSessionApi({ evaluate: callback => callback() });
+    }
+
+    it('accepts only a successful response with user and access token', async () => {
+        const data = { accessToken: 'current-token', user: { email: 'user@example.com' } };
+        await expect(probe({ ok: true, status: 200, json: async () => data }))
+            .resolves.toMatchObject({ ok: true, status: 200, data });
+    });
+
+    it('rejects HTTP 200 with an empty session object', async () => {
+        await expect(probe({ ok: true, status: 200, json: async () => ({}) }))
+            .resolves.toMatchObject({ ok: false, status: 200, data: null });
+    });
+
+    it('rejects an unauthorized session response even if its JSON has user fields', async () => {
+        await expect(probe({ ok: false, status: 401, json: async () => ({
+            accessToken: 'stale-token', user: { email: 'user@example.com' }
+        }) })).resolves.toMatchObject({ ok: false, status: 401, data: null });
     });
 });

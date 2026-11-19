@@ -222,26 +222,17 @@ async function run() {
 
         const realUserAgent = browserSession.realUserAgent;
 
-        const viewport = { width: 1920, height: 1080 };
-        const matched = realUserAgent.match(/Chrome\/(\d+)/);
-        const chromeMajor = matched ? Number(matched[1]) : 147;
-
         const browserProfile = getRegionBrowserProfile(paymentRegion);
 
         const contextOptions = {
             userAgent: realUserAgent,
-            viewport,
+            viewport: { width: 1920, height: 1080 },
             locale: browserProfile.locale,
             timezoneId: browserProfile.timezoneId,
             screen: { width: 1920, height: 1080 },
             deviceScaleFactor: 1,
             isMobile: false,
-            hasTouch: false,
-            extraHTTPHeaders: {
-                'sec-ch-ua': `"Not)A;Brand";v="8", "Chromium";v="${chromeMajor}", "Google Chrome";v="${chromeMajor}"`,
-                'sec-ch-ua-mobile': '?0',
-                'sec-ch-ua-platform': '"Windows"'
-            }
+            hasTouch: false
         };
         if (proxyConfig) {
             contextOptions.proxy = proxyConfig;
@@ -260,216 +251,6 @@ async function run() {
         const installResult = await installChatGptSession(context, sessionRaw);
         const sessionData = installResult?.sessionData || installResult;
         const cookieVerified = Boolean(installResult?.cookieVerified);
-
-        // ============= 指纹伪装 =============
-        const installBrowserFingerprint = (targetContext) => targetContext.addInitScript((injectedChromeMajor) => {
-            const NavProto = Object.getPrototypeOf(navigator);
-            const ScrProto = Object.getPrototypeOf(screen);
-            const safeDefine = (obj, key, getter) => {
-                try {
-                    Object.defineProperty(obj, key, { get: getter, configurable: true });
-                } catch (_) { /* ignore */ }
-            };
-
-            // 隐藏 webdriver
-            try { delete Object.getPrototypeOf(navigator).webdriver; } catch (_) { }
-            safeDefine(NavProto, 'webdriver', () => undefined);
-            try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true }); } catch (_) { }
-
-            // navigator.userAgentData
-            try {
-                const uaData = {
-                    brands: [
-                        { brand: 'Not)A;Brand', version: '8' },
-                        { brand: 'Chromium', version: String(injectedChromeMajor) },
-                        { brand: 'Google Chrome', version: String(injectedChromeMajor) }
-                    ],
-                    mobile: false,
-                    platform: 'Windows',
-                    getHighEntropyValues: () => Promise.resolve({
-                        architecture: 'x86',
-                        bitness: '64',
-                        mobile: false,
-                        model: '',
-                        platform: 'Windows',
-                        platformVersion: '15.0.0',
-                        wow64: false
-                    }),
-                    toJSON: () => ({ brands: uaData.brands, mobile: uaData.mobile, platform: uaData.platform })
-                };
-                safeDefine(NavProto, 'userAgentData', () => uaData);
-            } catch (_) { }
-
-            // plugins / mimeTypes
-            try {
-                const pdfMime = Object.create(MimeType.prototype);
-                Object.defineProperties(pdfMime, {
-                    type: { get: () => 'application/pdf' },
-                    suffixes: { get: () => 'pdf' },
-                    description: { get: () => 'Portable Document Format' }
-                });
-                const pdfPlugin = Object.create(Plugin.prototype);
-                Object.defineProperties(pdfPlugin, {
-                    name: { get: () => 'Chrome PDF Plugin' },
-                    filename: { get: () => 'internal-pdf-viewer' },
-                    description: { get: () => 'Portable Document Format' },
-                    length: { get: () => 1 },
-                    0: { get: () => pdfMime }
-                });
-                pdfPlugin.item = () => pdfMime;
-                pdfPlugin.namedItem = () => pdfMime;
-
-                const fakePlugins = Object.create(PluginArray.prototype);
-                Object.defineProperties(fakePlugins, {
-                    length: { get: () => 1 },
-                    0: { get: () => pdfPlugin }
-                });
-                fakePlugins.item = () => pdfPlugin;
-                fakePlugins.namedItem = (n) => n === pdfPlugin.name ? pdfPlugin : null;
-                fakePlugins.refresh = () => { };
-
-                const fakeMimeTypes = Object.create(MimeTypeArray.prototype);
-                Object.defineProperties(fakeMimeTypes, {
-                    length: { get: () => 1 },
-                    0: { get: () => pdfMime }
-                });
-                fakeMimeTypes.item = () => pdfMime;
-                fakeMimeTypes.namedItem = (n) => n === pdfMime.type ? pdfMime : null;
-
-                safeDefine(NavProto, 'plugins', () => fakePlugins);
-                safeDefine(NavProto, 'mimeTypes', () => fakeMimeTypes);
-            } catch (_) { }
-
-            // 语言、平台、硬件
-            safeDefine(NavProto, 'languages', () => ['en-US', 'en']);
-            safeDefine(NavProto, 'language', () => 'en-US');
-            safeDefine(NavProto, 'platform', () => 'Win32');
-            safeDefine(NavProto, 'hardwareConcurrency', () => 8);
-            safeDefine(NavProto, 'deviceMemory', () => 8);
-            safeDefine(NavProto, 'maxTouchPoints', () => 0);
-            safeDefine(NavProto, 'vendor', () => 'Google Inc.');
-
-            // navigator.connection
-            try {
-                const conn = { effectiveType: '4g', rtt: 100, downlink: 10, saveData: false };
-                safeDefine(NavProto, 'connection', () => conn);
-            } catch (_) { }
-
-            // window.chrome
-            try {
-                const fakeChrome = {
-                    app: {
-                        isInstalled: false,
-                        InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
-                        RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
-                        getDetails: () => null,
-                        getIsInstalled: () => false
-                    },
-                    runtime: {
-                        OnInstalledReason: { CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update' },
-                        OnRestartRequiredReason: { APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' },
-                        PlatformArch: { ARM: 'arm', ARM64: 'arm64', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
-                        PlatformNaclArch: { ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
-                        PlatformOs: { ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' },
-                        RequestUpdateCheckStatus: { NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available' },
-                        connect: () => { },
-                        sendMessage: () => { }
-                    },
-                    csi: () => ({ onloadT: Date.now(), pageT: Date.now() - 1000, startE: Date.now() - 2000, tran: 15 }),
-                    loadTimes: () => ({
-                        requestTime: Date.now() / 1000 - 2,
-                        startLoadTime: Date.now() / 1000 - 1.5,
-                        commitLoadTime: Date.now() / 1000 - 1,
-                        finishDocumentLoadTime: Date.now() / 1000 - 0.5,
-                        finishLoadTime: Date.now() / 1000,
-                        firstPaintTime: Date.now() / 1000 - 0.3,
-                        firstPaintAfterLoadTime: 0,
-                        navigationType: 'Other',
-                        wasFetchedViaSpdy: true,
-                        wasNpnNegotiated: true,
-                        npnNegotiatedProtocol: 'h2',
-                        wasAlternateProtocolAvailable: false,
-                        connectionInfo: 'h2'
-                    })
-                };
-                Object.defineProperty(window, 'chrome', { value: fakeChrome, writable: true, configurable: true });
-            } catch (_) { }
-
-            // permissions.query
-            try {
-                const origQuery = navigator.permissions.query.bind(navigator.permissions);
-                navigator.permissions.query = (params) => {
-                    if (params && params.name === 'notifications') {
-                        return Promise.resolve({ state: typeof Notification !== 'undefined' ? Notification.permission : 'default', onchange: null });
-                    }
-                    return origQuery(params).catch(() => ({ state: 'prompt', onchange: null }));
-                };
-            } catch (_) { }
-
-            // screen
-            safeDefine(ScrProto, 'availHeight', () => 1032);
-            safeDefine(ScrProto, 'availWidth', () => 1920);
-            safeDefine(ScrProto, 'colorDepth', () => 24);
-            safeDefine(ScrProto, 'pixelDepth', () => 24);
-            safeDefine(ScrProto, 'width', () => 1920);
-            safeDefine(ScrProto, 'height', () => 1080);
-
-            // Canvas 微噪声
-            try {
-                const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-                HTMLCanvasElement.prototype.toDataURL = function (...args) {
-                    const ctx = this.getContext('2d');
-                    if (ctx) {
-                        try {
-                            const w = this.width, h = this.height;
-                            if (w > 0 && h > 0) {
-                                const data = ctx.getImageData(0, 0, 1, 1);
-                                data.data[3] = Math.max(1, data.data[3] - 1);
-                                ctx.putImageData(data, 0, 0);
-                            }
-                        } catch (_) { }
-                    }
-                    return origToDataURL.apply(this, args);
-                };
-            } catch (_) { }
-
-            // WebGL
-            try {
-                const fakeWebGL = (gl) => {
-                    const origGetParameter = gl.getParameter.bind(gl);
-                    gl.getParameter = function (param) {
-                        if (param === 0x9245) return 'Google Inc. (Intel)';
-                        if (param === 0x9246) return 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)';
-                        return origGetParameter(param);
-                    };
-                };
-                const origGetCtx = HTMLCanvasElement.prototype.getContext;
-                HTMLCanvasElement.prototype.getContext = function (type, ...args) {
-                    const ctx = origGetCtx.call(this, type, ...args);
-                    if (ctx && (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl')) {
-                        try { fakeWebGL(ctx); } catch (_) { }
-                    }
-                    return ctx;
-                };
-            } catch (_) { }
-
-            // ChromeDriver 痕迹
-            try {
-                for (const key of Object.keys(window)) {
-                    if (/^(cdc_|\$cdc_|_phantom|callPhantom|webdriver-|driver-)/.test(key)) {
-                        try { delete window[key]; } catch (_) { }
-                    }
-                }
-            } catch (_) { }
-
-            // Notification.permission
-            try {
-                if (typeof Notification !== 'undefined') {
-                    Object.defineProperty(Notification, 'permission', { get: () => 'default', configurable: true });
-                }
-            } catch (_) { }
-        }, chromeMajor);
-        await installBrowserFingerprint(context);
 
         // --- Phase 0: Proxy Connectivity Check ---
         if (proxyConfig) {

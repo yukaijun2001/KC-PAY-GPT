@@ -112,16 +112,33 @@ async function waitForLoggedInChatUi(page, timeoutMs = 15000) {
     return false;
 }
 
-async function hasLoggedInSessionApi(page) {
+async function readLoggedInSessionApi(page) {
     try {
-        const data = await page.evaluate(async () => {
+        const result = await page.evaluate(async () => {
             const response = await fetch('/api/auth/session', { credentials: 'include' });
-            return response.json();
+            let data = null;
+            try { data = await response.json(); } catch (_) { /* non-JSON response */ }
+            return { ok: response.ok, status: response.status, data };
         });
-        return Boolean(data?.accessToken || data?.user?.email || data?.user?.id);
+        const data = result?.data;
+        const authenticated = Boolean(
+            result?.ok
+            && (data?.accessToken || data?.access_token)
+            && (data?.user?.email || data?.user?.id)
+        );
+        return {
+            ok: authenticated,
+            status: Number(result?.status || 0),
+            data: authenticated ? data : null,
+            error: authenticated ? '' : `ChatGPT 实际 /api/auth/session 未确认登录（HTTP ${Number(result?.status || 0)}）`
+        };
     } catch (_) {
-        return false;
+        return { ok: false, status: 0, data: null, error: '无法读取 ChatGPT 实际 /api/auth/session 响应' };
     }
+}
+
+async function hasLoggedInSessionApi(page) {
+    return (await readLoggedInSessionApi(page)).ok;
 }
 
 async function isCheckoutLoginGate(page) {
@@ -154,6 +171,7 @@ module.exports = {
     hasVisibleSessionExpiredChrome,
     hasLoggedInChatUi,
     waitForLoggedInChatUi,
+    readLoggedInSessionApi,
     hasLoggedInSessionApi,
     isCheckoutLoginGate,
     buildSessionNotLoggedInError
