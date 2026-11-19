@@ -475,7 +475,7 @@ describe('browser Checkout API', () => {
         await openApiCheckout(run.page, checkoutOptions);
         const headers = run.fetch.mock.calls[0][1].headers;
         expect(headers['oai-device-id']).toBe('bootstrap-device');
-        expect(headers['oai-did']).toBeUndefined();
+        expect(headers['oai-did']).toBe('bootstrap-device');
     });
 
     it('does not send a bare request if the SDK returns an empty token', async () => {

@@ -211,7 +211,7 @@ class ChatGPTService {
                         const { initMs, tokenMs, handoffs } = diag.sentinelTimings;
                         console.log(`[Checkout] Sentinel 就绪 init_ms=${initMs} token_ms=${tokenMs} handoffs=${handoffs}`);
                     }
-                    console.log(`[Checkout] 请求上下文 account=${diag.accountSource} account_matches_token=${flag(diag.accountMatchesToken)} device=${flag(diag.deviceHeaderPresent)} oai_did=${flag(diag.cookieDidPresent)} sentinel_flow=${diag.sentinelFlow} sentinel_device_match=${flag(diag.sentinelDeviceMatches)}`);
+                    console.log(`[Checkout] 请求上下文 account=${diag.accountSource} account_matches_token=${flag(diag.accountMatchesToken)} device=${flag(diag.deviceHeaderPresent)}(${diag.deviceSource || 'unknown'}) oai_did_cookie=${flag(diag.cookieDidPresent)} token_age_s=${diag.tokenAgeSec ?? 'unknown'} sentinel_flow=${diag.sentinelFlow} sentinel_device_match=${flag(diag.sentinelDeviceMatches)}`);
                 }
             } else {
                 const response = await this.request.post('https://chatgpt.com/backend-api/payments/checkout', {

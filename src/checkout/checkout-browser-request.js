@@ -187,11 +187,15 @@ async function requestBrowserCheckout(page, { accessToken, payload }) {
         const deviceCookie = document.cookie.split(';').map((item) => item.trim())
             .find((item) => item.startsWith('oai-did='));
         let deviceId = bootstrap.statsigContext?.deviceId;
+        let deviceSource = deviceId ? 'page' : 'none';
         let cookieDeviceId = '';
         if (deviceCookie) {
             try {
                 cookieDeviceId = decodeURIComponent(deviceCookie.slice('oai-did='.length));
-                if (cookieDeviceId) deviceId = cookieDeviceId;
+                if (cookieDeviceId) {
+                    deviceId = cookieDeviceId;
+                    deviceSource = 'cookie';
+                }
             } catch (_) { /* optional cookie */ }
         }
         const validAccountId = (value) => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
@@ -201,8 +205,10 @@ async function requestBrowserCheckout(page, { accessToken, payload }) {
             ['token', tokenAccountId]
         ].find(([, value]) => validAccountId(value));
         const accountId = candidate?.[1];
-        if (deviceId) headers['oai-device-id'] = deviceId;
-        if (cookieDeviceId) headers['oai-did'] = cookieDeviceId;
+        if (deviceId) {
+            headers['oai-device-id'] = deviceId;
+            headers['oai-did'] = deviceId;
+        }
         if (accountId) headers['chatgpt-account-id'] = accountId;
 
         let sentinelData = null;
@@ -210,15 +216,22 @@ async function requestBrowserCheckout(page, { accessToken, payload }) {
         const sentinelFlow = typeof sentinelData?.flow === 'string'
             ? (sentinelData.flow === 'chatgpt_checkout' ? 'match' : 'different')
             : 'unknown';
+        let tokenAgeSec = null;
+        try {
+            const claims = JSON.parse(atob(accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+            if (Number.isFinite(claims?.iat)) tokenAgeSec = Math.max(0, Math.round(Date.now() / 1000 - claims.iat));
+        } catch (_) { /* opaque token */ }
         const diagnostics = {
             sentinelTimings: sentinel.timings,
             accountSource: candidate?.[0] || 'none',
             accountMatchesToken: accountId && validAccountId(tokenAccountId) ? accountId === tokenAccountId : null,
             deviceHeaderPresent: Boolean(deviceId),
+            deviceSource,
             cookieDidPresent: Boolean(cookieDeviceId),
+            tokenAgeSec,
             sentinelFlow,
-            sentinelDeviceMatches: typeof sentinelData?.id === 'string' && cookieDeviceId
-                ? sentinelData.id === cookieDeviceId : null
+            sentinelDeviceMatches: typeof sentinelData?.id === 'string' && deviceId
+                ? sentinelData.id === deviceId : null
         };
 
         const controller = new AbortController();
