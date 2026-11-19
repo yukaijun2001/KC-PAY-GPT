@@ -203,22 +203,23 @@ class ChatGPTService {
             let apiResponse;
             if (this.page) {
                 console.log('[Checkout] 使用当前页面 Sentinel SDK 与浏览器会话创建链接');
-                const sessionStatus = await probeBrowserAccessToken(this.page, this.token);
-                if (sessionStatus === 401) {
-                    console.warn('[Checkout] AccessToken 已被上游吊销，先尝试会话刷新');
-                    const refreshed = await refreshBrowserAccessToken(this.page);
-                    if (!refreshed) {
-                        return {
-                            sessionId: null,
-                            checkoutUrl: null,
-                            error: 'SESSION_TOKEN_REVOKED: Session 的 AccessToken 已被上游吊销'
-                                + '（通常是同一账号在另一浏览器里刷新令牌）。'
-                                + '请关闭该账号的其他浏览器标签后重新获取 Session。'
-                        };
-                    }
+                // Session 可能由其他国家导出；先让站点按当前出口重新签发 AccessToken，
+                // 否则令牌与下单 IP 跨区，上游会直接判定 unusual activity。
+                const refreshed = await refreshBrowserAccessToken(this.page);
+                if (refreshed) {
                     this.token = refreshed;
                     this.headers.Authorization = `Bearer ${refreshed}`;
-                    console.log('[Checkout] 已通过页面会话刷新 AccessToken');
+                    console.log('[Checkout] 已用当前出口刷新 AccessToken');
+                }
+                const sessionStatus = await probeBrowserAccessToken(this.page, this.token);
+                if (sessionStatus === 401) {
+                    return {
+                        sessionId: null,
+                        checkoutUrl: null,
+                        error: 'SESSION_TOKEN_REVOKED: Session 的 AccessToken 已被上游吊销，且当前出口无法刷新'
+                            + '（通常是提供方仍在其他浏览器里使用该账号）。'
+                            + '请让提供方停止使用该账号后重新导出 Session。'
+                    };
                 }
                 apiResponse = await requestBrowserCheckout(this.page, { accessToken: this.token, payload });
                 const diag = apiResponse.diagnostics;

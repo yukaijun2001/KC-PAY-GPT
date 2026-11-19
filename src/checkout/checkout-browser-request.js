@@ -268,24 +268,24 @@ async function requestBrowserCheckout(page, { accessToken, payload }) {
  * 仅在原令牌仍能对应有效 refresh_token 时成功；被真实浏览器的轮换抢先时返回 null。
  */
 async function refreshBrowserAccessToken(page) {
-    if (new URL(page.url()).origin !== CHATGPT_ORIGIN) {
+    const request = page.context?.().request;
+    if (!request || typeof request.get !== 'function') {
         return null;
     }
-    return page.evaluate(async () => {
-        const decode = (token) => {
-            try {
-                const part = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-                return JSON.parse(atob(part));
-            } catch (_) {
-                return null;
-            }
-        };
-        let session;
+    const decode = (token) => {
         try {
-            session = await (await fetch('/api/auth/session', { credentials: 'include' })).json();
+            const part = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+            return JSON.parse(Buffer.from(part, 'base64').toString('utf8'));
         } catch (_) {
             return null;
         }
+    };
+    try {
+        const sessionResponse = await request.get(`${CHATGPT_ORIGIN}/api/auth/session`, {
+            timeout: 15000,
+            failOnStatusCode: false
+        });
+        const session = await sessionResponse.json().catch(() => null);
         const current = String(session?.accessToken || '').trim();
         if (!current) return null;
         const iat = decode(current)?.iat;
@@ -295,23 +295,22 @@ async function refreshBrowserAccessToken(page) {
             method: 'POST',
             path: '/backend-api/payments/checkout'
         });
-        try {
-            const response = await fetch(`/api/auth/session?${query}`, {
-                credentials: 'include',
-                headers: {
-                    ...(iat ? { 'X-OpenAI-Failed-Access-Token-Iat': String(iat) } : {}),
-                    'x-openai-target-path': '/api/auth/session',
-                    'x-openai-target-route': '/api/auth/session'
-                }
-            });
-            const data = await response.json().catch(() => null);
-            const refreshed = String(data?.accessToken || '').trim();
-            if (!response.ok || data?.error || !refreshed || refreshed === current) return null;
-            return refreshed;
-        } catch (_) {
-            return null;
-        }
-    }).catch(() => null);
+        const response = await request.get(`${CHATGPT_ORIGIN}/api/auth/session?${query}`, {
+            timeout: 20000,
+            failOnStatusCode: false,
+            headers: {
+                ...(iat ? { 'X-OpenAI-Failed-Access-Token-Iat': String(iat) } : {}),
+                'x-openai-target-path': '/api/auth/session',
+                'x-openai-target-route': '/api/auth/session'
+            }
+        });
+        const data = await response.json().catch(() => null);
+        const refreshed = String(data?.accessToken || '').trim();
+        if (!response.ok() || data?.error || !refreshed || refreshed === current) return null;
+        return refreshed;
+    } catch (_) {
+        return null;
+    }
 }
 
 /** 用当前浏览器上下文的网络栈校验 AccessToken 是否仍被上游接受 */
