@@ -62,7 +62,11 @@ async function runDebugWorker({ mode = 'auto', apiError, uiError, launchError, i
             getActiveProxy
         },
         './src/config/region-config': require('../src/config/region-config'),
-        './src/browser/session-auth': { installChatGptSession, bootstrapChatGptSession },
+        './src/browser/session-auth': {
+            installChatGptSession,
+            bootstrapChatGptSession,
+            resolveSessionInput: () => ({ sessionData: {} })
+        },
         './src/browser/browser-runtime': { connectTaskBrowser, applyCdpEnv: vi.fn(), closeTaskBrowser },
         './src/browser/playwright-proxy': { preparePlaywrightProxy },
         fs: { mkdirSync: vi.fn() },

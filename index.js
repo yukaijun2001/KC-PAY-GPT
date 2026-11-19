@@ -2,9 +2,9 @@ const { executePaymentWithRetry } = require('./src/payments/payment-retry');
 const { openPricingCheckout } = require('./src/checkout/pricing-checkout');
 const { openApiCheckout } = require('./src/checkout/chatgpt');
 const store = require('./src/persistence/mysql-store');
-const { getRegionConfig, getRegionBrowserProfile, getPlanPaymentRegion } = require('./src/config/region-config');
+const { getRegionConfig, getRegionBrowserProfile, getPlanPaymentRegion, isSupportedRegion } = require('./src/config/region-config');
 const { normalizePlanType } = require('./src/config/plans');
-const { installChatGptSession, bootstrapChatGptSession } = require('./src/browser/session-auth');
+const { installChatGptSession, bootstrapChatGptSession, resolveSessionInput } = require('./src/browser/session-auth');
 const { connectTaskBrowser, applyCdpEnv, closeTaskBrowser } = require('./src/browser/browser-runtime');
 const { preparePlaywrightProxy } = require('./src/browser/playwright-proxy');
 const {
@@ -184,6 +184,7 @@ async function recoverConnectionClosed(page, fallbackUrl = '') {
  */
 async function run() {
     const HEADFUL_BROWSER = true;
+    const SESSION_REGION_ALIGNMENT = String(process.env.SESSION_REGION_ALIGNMENT ?? '1') !== '0';
     const CHROMIUM_CHANNEL = (process.env.CHROMIUM_CHANNEL || '').trim();
 
     let proxyCleanup = async () => { };
@@ -205,7 +206,26 @@ async function run() {
         }
         const planType = normalizePlanType(requestedPlan);
         if (!planType) throw new Error(`不支持的套餐类型: ${String(requestedPlan)}`);
-        const paymentRegion = getPlanPaymentRegion(planType, CONFIG.paymentRegionOverride);
+        let paymentRegion = getPlanPaymentRegion(planType, CONFIG.paymentRegionOverride);
+        if (!CONFIG.paymentRegionOverride && SESSION_REGION_ALIGNMENT) {
+            const sessionCountry = String(
+                resolveSessionInput(CONFIG.chatgptSessionJson || CONFIG.chatgptToken)
+                    ?.sessionData?.statsigContext?.country || ''
+            ).trim().toUpperCase();
+            if (sessionCountry && sessionCountry !== paymentRegion) {
+                if (!isSupportedRegion(sessionCountry)) {
+                    console.log(`[Checkout] Session 来自 ${sessionCountry}（未支持地区），继续使用 ${paymentRegion}`);
+                } else {
+                    const alignedProxy = await store.getActiveProxy(sessionCountry).catch(() => '');
+                    if (alignedProxy) {
+                        paymentRegion = sessionCountry;
+                        console.log(`[Checkout] Session 来自 ${sessionCountry}，改用同区出口下单`);
+                    } else {
+                        console.log(`[Checkout] Session 来自 ${sessionCountry}，代理池没有该地区出口；继续使用 ${paymentRegion}（存在跨区风控风险）`);
+                    }
+                }
+            }
+        }
         const regionCfg = getRegionConfig(paymentRegion);
         const taskProxy = CONFIG.proxy || await store.getActiveProxy(paymentRegion);
         if (!taskProxy) throw new Error(`没有启用的 ${paymentRegion} 国家标签代理，请先在代理池设置标签并启用`);
