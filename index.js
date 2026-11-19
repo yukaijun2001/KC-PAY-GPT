@@ -184,7 +184,7 @@ async function recoverConnectionClosed(page, fallbackUrl = '') {
  */
 async function run() {
     const HEADFUL_BROWSER = true;
-    const ALIGN_RAW = String(process.env.SESSION_REGION_ALIGNMENT ?? 'switch').trim().toLowerCase();
+    const ALIGN_RAW = String(process.env.SESSION_REGION_ALIGNMENT ?? 'off').trim().toLowerCase();
     const SESSION_REGION_ALIGNMENT = ['0', 'off', 'false', 'no'].includes(ALIGN_RAW)
         ? 'off'
         : (['strict', 'require'].includes(ALIGN_RAW) ? 'strict' : 'switch');
