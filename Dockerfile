@@ -41,7 +41,10 @@ RUN pip install -r requirements-hcaptcha.txt \
     && python3 -m playwright install chromium
 
 # 单独安装显示探针，便于重建时复用上方体积较大的依赖层。
-RUN apt-get update && apt-get install -y --no-install-recommends x11-utils \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    x11-utils fontconfig fonts-noto-color-emoji \
+    fonts-crosextra-carlito fonts-crosextra-caladea \
+    && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制源码（含 hcaptcha solver）

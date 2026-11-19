@@ -6,6 +6,7 @@
 
 const { chromium } = require('playwright-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const { buildWindowsProfile } = require('./windows-fingerprint');
 
 chromium.use(StealthPlugin());
 
@@ -37,9 +38,12 @@ async function connectStandaloneBrowser(options = {}) {
     const chromiumChannel = String(options.chromiumChannel || '').trim();
     const cdpPort = String(options.cdpPort || process.env.CDP_PORT || '9222').trim();
 
+    const windowsProfile = buildWindowsProfile({ locale: 'en-US' });
     const launchArgs = [
         '--disable-blink-features=AutomationControlled',
-        `--remote-debugging-port=${cdpPort}`
+        `--remote-debugging-port=${cdpPort}`,
+        ...windowsProfile.launchArgs,
+        ...(process.platform === 'linux' ? windowsProfile.linuxArgs : [])
     ];
     if (process.platform === 'linux' && process.getuid?.() === 0) {
         launchArgs.push('--no-sandbox', '--disable-setuid-sandbox');
@@ -69,6 +73,7 @@ async function connectStandaloneBrowser(options = {}) {
         headful,
         cdpUrl,
         cdpPort,
+        browserVersion: browser.version(),
         realUserAgent: await probeUserAgent(browser)
     };
 }

@@ -82,12 +82,15 @@ install_playwright_deps() {
         debian)
             sudo apt-get update
             sudo apt-get install -y --no-install-recommends \
-                wget curl ca-certificates fonts-liberation fonts-noto-cjk \
+                wget curl ca-certificates fontconfig \
+                fonts-liberation fonts-noto-cjk fonts-noto-color-emoji \
+                fonts-crosextra-carlito fonts-crosextra-caladea \
                 libatk-bridge2.0-0 libatk1.0-0 libcups2 libdbus-1-3 \
                 libdrm2 libgbm1 libgtk-3-0 libnspr4 libnss3 \
                 libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2 \
                 libxss1 libasound2 libpangocairo-1.0-0 libpango-1.0-0 \
                 libxshmfence1 xdg-utils
+            sudo fc-cache -f
             success "Debian/Ubuntu 系统依赖已安装"
             ;;
         rhel)

@@ -257,6 +257,40 @@ PROXY=http://user:pass@proxy-host:port
 HEADFUL=1          # 业务浏览器固定使用有头 Chromium；Linux 容器由 Xvfb 提供虚拟显示
 ```
 
+**⑤-1 浏览器平台伪装（Linux 服务器 → Windows）**
+
+默认开启 `WINDOWS_FINGERPRINT=1`：跑在 Linux 上的有头 Chromium 会对外呈现为 Windows 10 桌面版 Chrome。
+实现在 `src/browser/windows-fingerprint.js`，三层同时对齐，避免互相矛盾被抓：
+
+| 层 | 伪装内容 |
+| --- | --- |
+| 网络层 | `User-Agent` 改为 `Windows NT 10.0; Win64; x64`，`sec-ch-ua-platform` 由 Playwright 依据 UA 自动设为 `"Windows"` |
+| JS 层 | `navigator.platform=Win32`、`userAgentData`（platform/platformVersion/arch/bitness）、`hardwareConcurrency`、`deviceMemory`、WebGL 的 `UNMASKED_VENDOR/RENDERER`、`document.fonts.check`、`enumerateDevices` 默认设备 |
+| 进程层 | `--lang=en-US --accept-lang=en-US,en --user-agent=...`；Linux 追加 `--disable-dev-shm-usage` 与 `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`（防止 WebRTC 泄露容器内网 IP） |
+
+可调项：
+
+```env
+WINDOWS_FINGERPRINT=1              # 0 = 关闭伪装，恢复真实 Linux 指纹
+WINDOWS_PLATFORM_VERSION=10.0.0    # Windows 10；想伪装 Win11 填 15.0.0
+WINDOWS_UA_CHROME_MAJOR=           # 留空自动跟随本机 Chromium 主版本
+WINDOWS_HARDWARE_CONCURRENCY=8     # navigator.hardwareConcurrency
+WINDOWS_DEVICE_MEMORY=8            # navigator.deviceMemory
+WINDOWS_FINGERPRINT_WEBRTC=1       # 0 = 不接管 WebRTC 策略
+```
+
+容器内自检（需要有 DISPLAY，Docker 镜像已内置 Xvfb）：
+
+```bash
+docker compose exec app node scripts/verify-windows-fingerprint.js
+```
+
+输出里应看到 `navigator.platform = "Win32"`、`userAgentData.platform = "Windows"`、
+WebGL 渲染器为 `ANGLE (Intel, ... D3D11)`，且七项断言全部 ✅。
+
+> Linux 上字体是最大的破绽：镜像已内置 Carlito / Caladea / Selawik 与
+> `/etc/fonts/conf.d/60-windows-fonts.conf` 别名，重建镜像后生效。
+
 **⑥ 启动服务**
 
 ```bash

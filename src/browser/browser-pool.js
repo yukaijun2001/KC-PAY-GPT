@@ -10,6 +10,7 @@ const path = require('path');
 const { projectPath } = require('../project-paths');
 const { chromium } = require('playwright-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const { buildWindowsProfile } = require('./windows-fingerprint');
 
 chromium.use(StealthPlugin());
 
@@ -139,11 +140,19 @@ async function warmSlot(slotId) {
     const profileDir = projectPath('data', 'browser-pool', `slot-${slotId}`);
     fs.mkdirSync(profileDir, { recursive: true });
 
+    // 槽位进程本身也带 Windows 标识，保证首屏 / DevTools 看到的不是 macOS
+    const windowsProfile = buildWindowsProfile({ locale: 'en-US' });
     const launchOptions = {
         headless: false,
-        args: buildLaunchArgs(port),
+        args: [
+            ...buildLaunchArgs(port),
+            ...windowsProfile.launchArgs,
+            ...(process.platform === 'linux' ? windowsProfile.linuxArgs : [])
+        ],
         viewport: { width: 1920, height: 1080 },
+        screen: { width: 1920, height: 1080 },
         locale: 'en-US',
+        userAgent: windowsProfile.userAgent,
         timezoneId: 'America/Chicago',
         ignoreHTTPSErrors: true
     };
@@ -158,6 +167,7 @@ async function warmSlot(slotId) {
         port,
         cdpUrl: `http://127.0.0.1:${port}`,
         persistentContext,
+        browserVersion: persistentContext.browser?.()?.version?.() || '',
         inUse: false,
         jobKey: null,
         uses: 0,

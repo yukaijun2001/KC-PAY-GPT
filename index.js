@@ -7,6 +7,11 @@ const { normalizePlanType } = require('./src/config/plans');
 const { installChatGptSession, bootstrapChatGptSession } = require('./src/browser/session-auth');
 const { connectTaskBrowser, applyCdpEnv, closeTaskBrowser } = require('./src/browser/browser-runtime');
 const { preparePlaywrightProxy } = require('./src/browser/playwright-proxy');
+const {
+    buildWindowsProfile,
+    buildWindowsContextOptions,
+    applyWindowsFingerprint
+} = require('./src/browser/windows-fingerprint');
 const fs = require('fs');
 const path = require('path');
 
@@ -224,16 +229,22 @@ async function run() {
 
         const browserProfile = getRegionBrowserProfile(paymentRegion);
 
-        const contextOptions = {
-            userAgent: realUserAgent,
-            viewport: { width: 1920, height: 1080 },
+        // 对外伪装成 Windows 桌面 Chrome：UA 用 Windows，
+        // Playwright 会据此自动把 navigator.platform 设为 Win32、
+        // userAgentData.platform 设为 Windows、sec-ch-ua-platform 设为 "Windows"。
+        const windowsProfile = buildWindowsProfile({
+            browserVersion: browserSession.browserVersion,
+            locale: browserProfile.locale
+        });
+        console.log(`🪟 [系统] 浏览器指纹: Windows / Chrome ${windowsProfile.major}（真实内核 UA: ${String(realUserAgent).slice(0, 48)}…）`);
+
+        const contextOptions = buildWindowsContextOptions(windowsProfile, {
             locale: browserProfile.locale,
             timezoneId: browserProfile.timezoneId,
-            screen: { width: 1920, height: 1080 },
-            deviceScaleFactor: 1,
-            isMobile: false,
-            hasTouch: false
-        };
+            extraHTTPHeaders: {
+                'Accept-Language': `${browserProfile.locale},en;q=0.9`
+            }
+        });
         if (proxyConfig) {
             contextOptions.proxy = proxyConfig;
         }
@@ -247,6 +258,8 @@ async function run() {
         }
 
         context = await browser.newContext(contextOptions);
+        // 必须在第一次导航（installChatGptSession 会开热身页）之前注入
+        await applyWindowsFingerprint(context, windowsProfile);
         const sessionRaw = CONFIG.chatgptSessionJson || CONFIG.chatgptToken;
         const installResult = await installChatGptSession(context, sessionRaw);
         const sessionData = installResult?.sessionData || installResult;

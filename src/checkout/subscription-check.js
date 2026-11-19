@@ -5,12 +5,16 @@ const { ProxyAgent } = require('proxy-agent');
 const { request: playwrightRequest } = require('playwright');
 const { extractProfileFromToken } = require('../browser/session-auth');
 const { preparePlaywrightProxy } = require('../browser/playwright-proxy');
+const { buildWindowsProfile } = require('../browser/windows-fingerprint');
 
 const CHECK_V4_BASE = 'https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27';
 const CANCEL_SUBSCRIPTION_URL = 'https://chatgpt.com/backend-api/subscriptions/cancel';
 const RESUME_SUBSCRIPTION_URL = 'https://chatgpt.com/backend-api/subscriptions/resume';
 const BILLING_PAGE_URL = 'https://chatgpt.com/account/manage';
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';
+// 与本项目浏览器指纹共用同一份 Windows profile，避免 API 请求和页面 UA 版本打架
+const WINDOWS_PROFILE = buildWindowsProfile({});
+const USER_AGENT = WINDOWS_PROFILE.userAgent;
+const SEC_CH_UA = `"Chromium";v="${WINDOWS_PROFILE.major}", "Not=A?Brand";v="24", "Google Chrome";v="${WINDOWS_PROFILE.major}"`;
 
 const PLAN_LABELS = {
     go: 'ChatGPT Go',
@@ -164,9 +168,13 @@ function buildCheckHeaders(accessToken) {
         'Sec-Fetch-Dest': 'empty',
         'Sec-Fetch-Mode': 'cors',
         'Sec-Fetch-Site': 'same-origin',
-        'sec-ch-ua': '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
+        'sec-ch-ua': SEC_CH_UA,
         'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"Windows"'
+        'sec-ch-ua-platform': '"Windows"',
+        'sec-ch-ua-platform-version': `"${WINDOWS_PROFILE.platformVersion}"`,
+        'sec-ch-ua-arch': '"x86"',
+        'sec-ch-ua-bitness': '"64"',
+        'sec-ch-ua-model': '""'
     };
 }
 

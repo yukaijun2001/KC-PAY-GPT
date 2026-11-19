@@ -33,6 +33,7 @@ async function connectPoolBrowser(options = {}) {
         headful: true,
         cdpUrl: poolCdpUrl,
         poolSlotId: slotLabel,
+        browserVersion: browser.version(),
         realUserAgent: await probeUserAgent(browser, DEFAULT_UA)
     };
 }
