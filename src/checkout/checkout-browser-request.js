@@ -314,4 +314,22 @@ async function refreshBrowserAccessToken(page) {
     }).catch(() => null);
 }
 
-module.exports = { requestBrowserCheckout, refreshBrowserAccessToken };
+/** 用当前浏览器上下文的网络栈校验 AccessToken 是否仍被上游接受 */
+async function probeBrowserAccessToken(page, accessToken) {
+    const request = page.context?.().request;
+    if (!request || typeof request.get !== 'function') {
+        return 0;
+    }
+    try {
+        const response = await request.get(`${CHATGPT_ORIGIN}/backend-api/me`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            timeout: 15000,
+            failOnStatusCode: false
+        });
+        return response.status();
+    } catch (_) {
+        return -1;
+    }
+}
+
+module.exports = { requestBrowserCheckout, refreshBrowserAccessToken, probeBrowserAccessToken };

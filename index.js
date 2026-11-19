@@ -331,6 +331,11 @@ async function run() {
                 checkoutOpened = true;
             } catch (apiError) {
                 console.warn(`[Warn] API Checkout 失败: ${apiError.message}`);
+                if (apiError.message.includes('SESSION_TOKEN_REVOKED')) {
+                    throw new Error(apiError.message
+                        .replace(/^API 创建 Checkout 失败:\s*/, '')
+                        .replace(/^SESSION_TOKEN_REVOKED:\s*/, ''));
+                }
                 if (checkoutMode === 'api') {
                     throw apiError;
                 }
