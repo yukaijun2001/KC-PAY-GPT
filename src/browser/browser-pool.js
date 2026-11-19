@@ -135,10 +135,26 @@ function buildLaunchArgs(port) {
     return args;
 }
 
+function clearStaleProfileLock(profileDir) {
+    for (const name of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+        const target = path.join(profileDir, name);
+        try {
+            fs.lstatSync(target);
+            fs.rmSync(target, { force: true });
+            console.log(`[BrowserPool] 已清理失效配置锁 ${target}`);
+        } catch (error) {
+            if (error?.code !== 'ENOENT') {
+                console.warn(`[BrowserPool] 清理配置锁失败 ${target}: ${error.message}`);
+            }
+        }
+    }
+}
+
 async function warmSlot(slotId) {
     const port = BASE_PORT + slotId;
     const profileDir = projectPath('data', 'browser-pool', `slot-${slotId}`);
     fs.mkdirSync(profileDir, { recursive: true });
+    clearStaleProfileLock(profileDir);
 
     // 槽位进程本身也带 Windows 标识，保证首屏 / DevTools 看到的不是 macOS
     const windowsProfile = buildWindowsProfile({ locale: 'en-US' });
