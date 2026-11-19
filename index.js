@@ -184,7 +184,10 @@ async function recoverConnectionClosed(page, fallbackUrl = '') {
  */
 async function run() {
     const HEADFUL_BROWSER = true;
-    const SESSION_REGION_ALIGNMENT = String(process.env.SESSION_REGION_ALIGNMENT ?? '1') !== '0';
+    const ALIGN_RAW = String(process.env.SESSION_REGION_ALIGNMENT ?? 'switch').trim().toLowerCase();
+    const SESSION_REGION_ALIGNMENT = ['0', 'off', 'false', 'no'].includes(ALIGN_RAW)
+        ? 'off'
+        : (['strict', 'require'].includes(ALIGN_RAW) ? 'strict' : 'switch');
     const CHROMIUM_CHANNEL = (process.env.CHROMIUM_CHANNEL || '').trim();
 
     let proxyCleanup = async () => { };
@@ -207,12 +210,18 @@ async function run() {
         const planType = normalizePlanType(requestedPlan);
         if (!planType) throw new Error(`不支持的套餐类型: ${String(requestedPlan)}`);
         let paymentRegion = getPlanPaymentRegion(planType, CONFIG.paymentRegionOverride);
-        if (!CONFIG.paymentRegionOverride && SESSION_REGION_ALIGNMENT) {
+        if (!CONFIG.paymentRegionOverride && SESSION_REGION_ALIGNMENT !== 'off') {
             const sessionCountry = String(
                 resolveSessionInput(CONFIG.chatgptSessionJson || CONFIG.chatgptToken)
                     ?.sessionData?.statsigContext?.country || ''
             ).trim().toUpperCase();
             if (sessionCountry && sessionCountry !== paymentRegion) {
+                if (SESSION_REGION_ALIGNMENT === 'strict') {
+                    throw new Error(
+                        `Session 来源国家 ${sessionCountry} 与支付地区 ${paymentRegion} 不一致。`
+                        + `请通过 ${paymentRegion} 代理重新登录并导出 Session；登录与下单必须同国家，否则会被判定 unusual activity`
+                    );
+                }
                 if (!isSupportedRegion(sessionCountry)) {
                     console.log(`[Checkout] Session 来自 ${sessionCountry}（未支持地区），继续使用 ${paymentRegion}`);
                 } else {
